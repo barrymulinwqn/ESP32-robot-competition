@@ -9,14 +9,16 @@
 | 工具 | 版本要求 | 说明 |
 |------|----------|------|
 | macOS / Windows / Linux | 任意 | 开发宿主机 |
-| JDK (Java Development Kit) | **17**（推荐 Temurin） | Kotlin/Gradle 编译依赖 |
-| Android Studio | **Hedgehog 2023.1.1** 或更新 | 官方 IDE，含 SDK Manager |
+| JDK (Java Development Kit) | **17** 或 **21 LTS**（推荐 Temurin） | Kotlin/Gradle 编译依赖；已验证 openjdk 21.0.6 LTS 兼容 |
+| Android Studio | **Panda 3 (2025.3.3)** 或更新 | 官方 IDE，含 SDK Manager |
 | Android SDK | compileSdk **34**，minSdk **29** | 由 Android Studio 自动安装 |
 | Android 手机 | Android 10+（API 29+） | 用于真机测试 |
 
 ---
 
-## 二、安装 JDK 17
+## 二、安装 JDK 17 或 21
+
+> **已验证兼容版本**：`openjdk version "21.0.6" 2025-01-21 LTS` 可正常编译本项目。JDK 17 与 JDK 21 LTS 均可使用。
 
 ### macOS（推荐 Homebrew）
 
@@ -24,28 +26,35 @@
 # 安装 Homebrew（如已有则跳过）
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# 安装 Eclipse Temurin JDK 17
+# 安装 Eclipse Temurin JDK 21（推荐，已验证兼容）
+brew install --cask temurin@21
+
+# 或安装 JDK 17
 brew install --cask temurin@17
 
 # 验证
 java -version
-# 预期输出：openjdk version "17.x.x" ...
+# 预期输出示例：openjdk version "21.0.6" 2025-01-21 LTS ...
 ```
 
 ### Windows
 
 1. 访问 https://adoptium.net/
-2. 选择 **JDK 17 (LTS)** → **Windows x64 MSI Installer**
+2. 选择 **JDK 21 (LTS)** 或 **JDK 17 (LTS)** → **Windows x64 MSI Installer**
 3. 安装时勾选 **"Set JAVA_HOME variable"**
 4. 打开 PowerShell 验证：`java -version`
 
 ---
 
-## 三、安装 Android Studio
+## 三、安装 Android Studio Panda 3
+
+> 当前稳定版：**Android Studio Panda 3（2025.3.3）**，发布于 2026 年 4 月。
 
 1. 访问 https://developer.android.com/studio
 2. 下载对应平台安装包（.dmg / .exe / .tar.gz）
 3. 按向导安装，首次启动时选择 **Standard 安装**（自动下载 Android SDK、模拟器等）
+
+> **Panda 3 新特性提示**：内置 Agent Mode 权限管理与 Skills 扩展（Gemini AI 功能），不影响本项目编译，可忽略。
 
 ### 安装完成后配置 SDK
 
@@ -68,7 +77,7 @@ java -version
 
 > **Gradle 同步失败常见原因：**
 > - 网络问题无法下载依赖 → 配置代理或使用国内镜像（见附录）
-> - JDK 版本不对 → File → Project Structure → SDK Location → JDK 选 17
+> - JDK 版本不对 → File → Project Structure → SDK Location → JDK 选 17 或 21
 
 ---
 
