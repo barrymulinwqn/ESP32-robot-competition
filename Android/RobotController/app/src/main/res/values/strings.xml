@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">机器人控制器</string>
+    <string name="connect">连接</string>
+    <string name="disconnect">断开</string>
+    <string name="laser_on">激光开</string>
+    <string name="laser_off">激光关</string>
+    <string name="brake">急停</string>
+    <string name="reset_ir">重置命中</string>
+</resources>

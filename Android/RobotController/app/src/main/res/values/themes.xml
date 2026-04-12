@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 不使用 XML 主题，此处保留最小化声明供 AndroidManifest 引用 -->
+    <style name="Theme.RobotController" parent="android:Theme.Material.NoTitleBar.Fullscreen" />
+</resources>
