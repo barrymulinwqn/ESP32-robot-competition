@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Compose 不使用 XML 主题，此处保留最小化声明供 AndroidManifest 引用 -->
-    <style name="Theme.RobotController" parent="android:Theme.Material.NoTitleBar.Fullscreen" />
+    <!-- 全屏由 MainActivity 通过 WindowInsetsControllerCompat 控制，Theme 只需无 ActionBar -->
+    <style name="Theme.RobotController" parent="Theme.AppCompat.NoActionBar" />
 </resources>

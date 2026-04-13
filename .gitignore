@@ -65,3 +65,8 @@ captures/
 .idea/assetWizardSettings.xml
 *.iml
 
+/build/
+**/build/
+
+/.gradle/
+**/.gradle/

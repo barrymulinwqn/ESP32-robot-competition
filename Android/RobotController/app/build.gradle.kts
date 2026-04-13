@@ -55,6 +55,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Activity + ViewModel
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.1")

@@ -8,5 +8,5 @@
     <string name="laser_off">激光关</string>
     <string name="laser_on">激光开</string>
     <string name="reset_ir">重置命中</string>
-    <style name="Theme.RobotController" parent="android:Theme.Material.NoTitleBar.Fullscreen"/>
+    <style name="Theme.RobotController" parent="Theme.AppCompat.NoActionBar"/>
 </resources>
