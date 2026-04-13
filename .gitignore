@@ -42,7 +42,7 @@
 
 .DS_Store
 
-/build
+/app/build
 *.apk
 *.aab
 .idea/
