@@ -191,6 +191,7 @@ static void sendIRCount(uint8_t clientNum) {
     uint32_t count = irCount;
     interrupts();
 
+    Serial.printf("[IR] Send ir_count=%u → client #%u\n", count, clientNum);
     StaticJsonDocument<64> doc;
     doc["ir_count"] = count;
     char buf[64];
@@ -206,6 +207,7 @@ static void broadcastIRCount() {
     uint32_t count = irCount;
     interrupts();
 
+    Serial.printf("[IR] Broadcast ir_count=%u\n", count);
     StaticJsonDocument<64> doc;
     doc["ir_count"] = count;
     char buf[64];
@@ -245,6 +247,7 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type,
 
         // ── 接收 JSON 文本指令 ────────────────────────────────
         case WStype_TEXT: {
+            Serial.printf("[WS #%u] RX: %.*s\n", clientNum, (int)length, (char*)payload);
             StaticJsonDocument<128> doc;
             DeserializationError err = deserializeJson(doc, payload, length);
             if (err) {
@@ -293,7 +296,11 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type,
             }
             // ── {"cmd":"get_ir"} ─────────────────────────────
             else if (strcmp(cmd, "get_ir") == 0) {
+                Serial.printf("[IR] get_ir ← client #%u\n", clientNum);
                 sendIRCount(clientNum);
+            }
+            else {
+                Serial.printf("[WS] Unknown cmd: \"%s\"\n", cmd);
             }
             break;
         }
@@ -342,6 +349,21 @@ void setup() {
     pinMode(IR_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(IR_PIN), onIRFalling, FALLING);
 
+    // ── Wi-Fi AP 事件回调（记录手机 Wi-Fi 层连入/断开）────────
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+        if (event == ARDUINO_EVENT_WIFI_AP_STACONNECTED) {
+            Serial.printf("[WiFi] Station joined  MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+                          info.wifi_ap_staconnected.mac[0], info.wifi_ap_staconnected.mac[1],
+                          info.wifi_ap_staconnected.mac[2], info.wifi_ap_staconnected.mac[3],
+                          info.wifi_ap_staconnected.mac[4], info.wifi_ap_staconnected.mac[5]);
+        } else if (event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) {
+            Serial.printf("[WiFi] Station left    MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+                          info.wifi_ap_stadisconnected.mac[0], info.wifi_ap_stadisconnected.mac[1],
+                          info.wifi_ap_stadisconnected.mac[2], info.wifi_ap_stadisconnected.mac[3],
+                          info.wifi_ap_stadisconnected.mac[4], info.wifi_ap_stadisconnected.mac[5]);
+        }
+    });
+
     // ── Wi-Fi AP 热点 ────────────────────────────────────────
     WiFi.softAP(AP_SSID, AP_PASSWORD);
     Serial.printf("[WiFi] AP started\n  SSID : %s\n  IP   : %s\n  Port : %d\n",
@@ -355,6 +377,7 @@ void setup() {
     Serial.println("[WS] Server started");
 
     lastCmdTime = millis();
+    Serial.println("[Init] Setup complete. Waiting for connections...");
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -366,6 +389,7 @@ void loop() {
 
     // ── 安全超时：无指令则制动停车（短路制动，防竞赛失控）────
     if (millis() - lastCmdTime > MOTOR_TIMEOUT_MS) {
+        Serial.println("[Motor] Timeout → auto BRAKE");
         brakeMotors();
         lastCmdTime = millis();     // 重置计时，避免每帧重复调用
     }

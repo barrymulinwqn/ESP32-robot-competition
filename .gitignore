@@ -42,7 +42,7 @@
 
 .DS_Store
 
-/app/build
+/app/build/
 *.apk
 *.aab
 .idea/
@@ -51,3 +51,17 @@ local.properties
 .kotlin/
 *.jks
 *.keystore
+
+.gradle/
+build/
+captures/
+.externalNativeBuild
+.cxx/
+
+.idea/workspace.xml
+.idea/libraries/
+.idea/modules.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+*.iml
+
