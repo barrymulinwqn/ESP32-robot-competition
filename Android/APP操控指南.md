@@ -26,9 +26,41 @@
 | 项目 | 要求 |
 |------|------|
 | Android 版本 | **≥ 10**（API 29）|
+| 运行设备 | **真实 Android 手机**（模拟器 AVD 不支持，见下方说明）|
 | 权限 | `ACCESS_FINE_LOCATION`（连接指定 SSID 必须）|
 | 屏幕方向 | **横屏**（强制 Landscape，不可旋转）|
 | ESP32-S3 固件 | `TB6612motor_ESP32S3_WiFi.ino` 已烧录并运行 |
+
+### 1.1 设备兼容性说明
+
+#### 为什么必须使用真实设备（不能用 AVD 模拟器）
+
+App 通过 `WifiNetworkSpecifier` API 连接 ESP32-S3 AP 热点，该 API 要求设备具备**物理 Wi-Fi 芯片**，并向系统申请 `TRANSPORT_WIFI` 类型的网络。  
+AVD 模拟器没有真实 Wi-Fi 适配器，其网络是通过虚拟以太网桥接到宿主机的，`TRANSPORT_WIFI` 永远无法满足，连接会立即触发 `onUnavailable()` 回调并报错「找不到 Robot-ESP32 热点」。
+
+| 运行环境 | 能否连接 ESP32 AP | 原因 |
+|---------|-----------------|------|
+| 真实 Android 手机 | ✅ 可以 | 有 Wi-Fi 芯片，`WifiNetworkSpecifier` 正常工作 |
+| AVD 模拟器 | ❌ 不行 | 无 Wi-Fi 芯片，`TRANSPORT_WIFI` 不可用 |
+
+#### 小米（MIUI）设备特别说明
+
+以小米 Mix 4 为代表的 MIUI 手机完全兼容本 App，但有以下三点需要注意：
+
+**① 「Wi-Fi 无法上网」弹窗**  
+ESP32 AP 没有互联网出口，MIUI 会弹出提示：
+> "Robot-ESP32 无法访问互联网，是否继续使用？"
+
+选择 **「继续使用」** 即可。App 已调用 `bindProcessToNetwork()` 将流量强制绑定到 ESP32 AP，不受影响。
+
+**② MIUI 后台省电策略**  
+MIUI 的「神隐模式」可能在 App 切后台时杀掉进程，导致机器人失控。建议提前设置：
+- 设置 → 应用设置 → 应用管理 → RobotController → **电池** → 选择「无限制」
+- 在多任务界面下拉 App 卡片，锁定到后台（防止被清理）
+
+**③ 位置权限路径**  
+若首次弹窗时误选「拒绝」，可通过以下路径重新授予：
+> 设置 → 隐私保护 → 权限管理 → 位置信息 → RobotController → 改为「使用期间允许」
 
 ---
 
@@ -410,3 +442,6 @@ ESP32 侧也有超时保护：若超过设定的 `MOTOR_TIMEOUT_MS` 毫秒未收
 | App 切到后台后机器人停止 | 正常安全行为 | 保持 App 在前台运行，避免切换 |
 | 手机移动数据断网 | App 绑定 ESP32 AP 后无移动数据 | 正常现象；断开连接后自动恢复移动数据路由 |
 | 位置权限被拒绝后无法连接 | `WifiNetworkSpecifier` 需要精确位置权限 | 前往系统设置 → 应用权限 → 重新授予位置权限 |
+| 模拟器（AVD）连接失败 | AVD 无物理 Wi-Fi 芯片，`TRANSPORT_WIFI` 不可用 | 必须使用真实 Android 10+ 手机 |
+| MIUI 弹出「无法上网」提示 | ESP32 AP 无互联网出口，MIUI 检测到后弹窗 | 点击「继续使用」，App 已绑定网络路由，不影响通信 |
+| MIUI 切后台后机器人失控 | MIUI 神隐模式/省电策略杀掉进程 | 设置 → 应用管理 → RobotController → 电池 → 无限制 |
