@@ -57,6 +57,8 @@ local.properties
 *.keystore
 
 .gradle/
+**/*.gradle
+**/.gradle
 build/
 captures/
 .externalNativeBuild
