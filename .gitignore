@@ -40,7 +40,11 @@
 # debug information files
 *.dwo
 
-.DS_Store
+.DS_Store/
+**/.DS_Store
+
+/.DS_Store/
+**/.DS_Store/
 
 /app/build/
 *.apk
@@ -58,15 +62,30 @@ captures/
 .externalNativeBuild
 .cxx/
 
+
+# IntelliJ/Android Studio
+*.iml
 .idea/workspace.xml
-.idea/libraries/
-.idea/modules.xml
+.idea/tasks.xml
+.idea/gradle.xml
 .idea/navEditor.xml
 .idea/assetWizardSettings.xml
-*.iml
+.idea/dictionaries/
+.idea/libraries/
+.idea/caches/
+.idea/modules.xml
 
 /build/
 **/build/
 
+build/
+**/build/
+
 /.gradle/
 **/.gradle/
+
+/.gradle/8.13/
+**/.gradle/8.13/
+
+/debug/
+**/debug/
