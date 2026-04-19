@@ -41,8 +41,8 @@ class RobotViewModel(application: Application) : AndroidViewModel(application) {
     // ────────────────────────────────────────────────────────────
 
     fun connect(
-        ssid: String = "Robot-ESP32",
-        password: String = "12345678"
+        ssid: String = "Robot-ESP32-Barry",
+        password: String = "rockwellrobot1234"
     ) {
         wsClient.connect(getApplication(), ssid, password)
         startMotorLoop()

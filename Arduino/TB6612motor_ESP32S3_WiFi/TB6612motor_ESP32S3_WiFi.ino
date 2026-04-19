@@ -38,7 +38,7 @@
  *     {"cmd":"get_ir"}                                // 主动请求当前计数
  *
  *   ESP32 → 手机（主动推送）：
- *     {"status":"connected","ip":"192.168.4.1","ssid":"Robot-ESP32"}
+ *     {"status":"connected","ip":"192.168.4.18","ssid":"Robot-ESP32"}
  *     {"ir_count":<uint32>}                           // 计数变化时实时推送
  *
  * ── 安全机制 ────────────────────────────────────────────────────────
@@ -53,8 +53,8 @@
 // ════════════════════════════════════════════════════════════════
 //  Wi-Fi AP 配置
 // ════════════════════════════════════════════════════════════════
-static const char* AP_SSID     = "Robot-ESP32";
-static const char* AP_PASSWORD = "12345678";    // 至少 8 位
+static const char* AP_SSID     = "Robot-ESP32-Barry";
+static const char* AP_PASSWORD = "rockwellrobot1234";    // 至少 8 位
 
 // ════════════════════════════════════════════════════════════════
 //  引脚定义
