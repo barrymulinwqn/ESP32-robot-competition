@@ -95,7 +95,7 @@ class RobotWebSocketClient {
         context: Context,
         ssid: String = "Robot-ESP32-Barry",
         password: String = "rockwellrobot1234",
-        wsUrl: String = "ws://192.168.4.18:81"
+        wsUrl: String = "ws://192.168.4.1:81"
     ) {
         if (_connectionState.value is ConnectionState.Connecting ||
             _connectionState.value is ConnectionState.Connected
