@@ -122,9 +122,19 @@ void IRAM_ATTR onIRFalling() {
 // ════════════════════════════════════════════════════════════════
 //  电机控制函数
 //  pwm 范围：-255（满速反转）~ 0（停止）~ +255（满速正转）
-//  方向逻辑参考 TB6612motor_ArduinoUNO_Demo.ino：
-//    Motor A 正转：AIN1=HIGH, AIN2=LOW
-//    Motor B 正转：BIN1=LOW,  BIN2=HIGH
+//
+//  本文件实际执行的方向逻辑：
+//    Motor A 正转：AIN1=HIGH, AIN2=LOW   ← 与 ArduinoUNO_Demo 一致
+//    Motor B 正转：BIN1=HIGH, BIN2=LOW   ← 注意：与 ArduinoUNO_Demo 相反！
+//
+//  ⚠️  兼容说明：
+//    TB6612motor_ArduinoUNO_Demo.ino 中 Motor B "正转" 定义为
+//    BIN1=LOW, BIN2=HIGH（即与本文件相反）。两侧电机若对称安装，
+//    Motor B 需旋转方向与 Motor A 相反才能使车体直行。
+//    Android App 发送的指令中 a, b 的正负号已按本文件约定校准：
+//      {"cmd":"motor","a":-255,"b":-255}  → 双电机"反转"→ 车体前进
+//    若实测车体后退（而非前进），在 RobotViewModel.onJoystick() 中
+//    对 left/right 取反，或将 Motor B 的 BIN1/BIN2 接线对调即可。
 // ════════════════════════════════════════════════════════════════
 static void setMotorA(int pwm) {
     pwm = constrain(pwm, -255, 255);

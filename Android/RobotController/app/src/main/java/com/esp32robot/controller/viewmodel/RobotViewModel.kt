@@ -41,8 +41,8 @@ class RobotViewModel(application: Application) : AndroidViewModel(application) {
     // ────────────────────────────────────────────────────────────
 
     fun connect(
-        ssid: String = "Robot-ESP32-Barry",
-        password: String = "rockwellrobot1234"
+        ssid: String = "Robot-ESP32-XXXXXX",
+        password: String = "12345678"
     ) {
         wsClient.connect(getApplication(), ssid, password)
         startMotorLoop()
@@ -78,13 +78,39 @@ class RobotViewModel(application: Application) : AndroidViewModel(application) {
     //  摇杆输入（UI 层调用，只写缓存，不直接发网络）
     // ────────────────────────────────────────────────────────────
 
+    // ────────────────────────────────────────────────────────────
+    //  单摇杆 Arcade Drive 差速混控
+    //  维持原有 Y 轴符号约定（normY=+1 上推 → 负 PWM → 机器人前进）
+    //
+    //  左电机 (A) = −clamp(Y + X, −1, 1) × 255
+    //  右电机 (B) = −clamp(Y − X, −1, 1) × 255
+    //
+    //  效果：
+    //    推上(Y=+1, X=0)  → A=-255, B=-255  前进
+    //    推下(Y=-1, X=0)  → A=+255, B=+255  后退
+    //    推右(Y=0,  X=+1) → A=-255, B=+255  右转（原地）
+    //    推左(Y=0,  X=-1) → A=+255, B=-255  左转（原地）
+    //    右上对角          → 左快右慢        右前弧线
+    //    左上对角          → 左慢右快        左前弧线
+    // ────────────────────────────────────────────────────────────
+    fun onJoystick(normX: Float, normY: Float) {
+        val left  = -(normY + normX).coerceIn(-1f, 1f)
+        val right = -(normY - normX).coerceIn(-1f, 1f)
+        pendingMotorA.set((left  * 255f).toInt().coerceIn(-255, 255))
+        pendingMotorB.set((right * 255f).toInt().coerceIn(-255, 255))
+    }
+
+    /** 单摇杆松开：双电机归零（惰行） */
+    fun onJoystickRelease() {
+        pendingMotorA.set(0)
+        pendingMotorB.set(0)
+    }
+
     /**
-     * 左摇杆 Y 轴 → 左电机 (Motor A)
-     * 右摇杆 Y 轴 → 右电机 (Motor B)
+     * 左摇杆 Y 轴 → 左电机 (Motor A) — 保留供双摇杆模式使用
      * @param normY 归一化 Y 值，范围 -1f（下）~ +1f（上）
      */
     fun onLeftJoystick(normX: Float, normY: Float) {
-        // 坦克式双摇杆：Y 轴控制速度，X 轴忽略（差速由双摇杆 Y 独立控制）
         pendingMotorA.set((-normY * 255).toInt().coerceIn(-255, 255))
     }
 
