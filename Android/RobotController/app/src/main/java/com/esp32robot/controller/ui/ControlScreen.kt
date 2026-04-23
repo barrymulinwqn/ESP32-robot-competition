@@ -59,13 +59,12 @@ import kotlin.math.abs
  *
  * 布局（横屏）：
  * ┌──────────────┬────────────────────────────────┬──────────────┐
- * │  [电机转速]  │              [速度: ○低 ●中 ○高]│  [连接状态]  │
- * │              │                                │  [连接/断开] │
- * │  左: ████░   │         ┌───────────┐          │  [激光开关]  │
- * │       80%    │         │ ↖  ↑  ↗   │          │  [命中次数]  │
- * │  前进        │         │ ←  ●  →   │          │             │
- * │              │         │ ↙  ↓  ↘   │          │  [■ 急  停] │
- * │  右: ██░░░   │         └───────────┘          │             │
+ * │  [电机转速]  │                                │  [连接状态]  │
+ * │  左: ████░   │         ┌───────────┐          │  [连接/断开] │
+ * │  右: ██░░░   │         │ ↖  ↑  ↗   │          │  [激光开关]  │
+ * │  [速度级别]  │         │ ←  ●  →   │          │  [命中次数]  │
+ * │  ○低 ●中 ○高 │         │ ↙  ↓  ↘   │          │             │
+ * │              │         └───────────┘          │  [■ 急  停] │
  * └──────────────┴────────────────────────────────┴──────────────┘
  */
 @Composable
@@ -90,29 +89,24 @@ fun ControlScreen(viewModel: RobotViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // ── 左侧：电机转速面板（22%）────────────────────────────
+            // ── 左侧：电机转速面板 + 速度选择器（22%）──────────────
             MotorSpeedPanel(
-                motorA   = motorA,
-                motorB   = motorB,
-                modifier = Modifier.weight(0.22f).fillMaxHeight()
+                motorA     = motorA,
+                motorB     = motorB,
+                speedLevel = speedLevel,
+                onSpeedSelect = { viewModel.setSpeedLevel(it) },
+                modifier   = Modifier.weight(0.22f).fillMaxHeight()
             )
 
-            // ── 中央：方向盘 + 速度选择器（50%）─────────────────────
-            Box(modifier = Modifier.weight(0.50f).fillMaxHeight()) {
-                // 速度选择器：悬浮于方向盘右上角
-                SpeedSelector(
-                    selected = speedLevel,
-                    onSelect = { viewModel.setSpeedLevel(it) },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 2.dp, end = 2.dp)
-                )
-                // 九宫格大圆方向盘：居中
+            // ── 中央：方向盘（50%）──────────────────────────────────
+            Box(
+                modifier        = Modifier.weight(0.50f).fillMaxHeight(),
+                contentAlignment = Alignment.Center
+            ) {
                 DirectionPad(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .aspectRatio(1f)
-                        .align(Alignment.Center),
+                        .aspectRatio(1f),
                     onZonePress   = { zone -> if (isConnected) viewModel.sendDirection(zone) },
                     onZoneRelease = { viewModel.releaseDirection() }
                 )
@@ -217,6 +211,8 @@ fun ControlScreen(viewModel: RobotViewModel) {
 private fun MotorSpeedPanel(
     motorA: Int,
     motorB: Int,
+    speedLevel: SpeedLevel,
+    onSpeedSelect: (SpeedLevel) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -240,6 +236,11 @@ private fun MotorSpeedPanel(
             )
             MotorSpeedBar(label = "左电机", value = motorA, modifier = Modifier.fillMaxWidth())
             MotorSpeedBar(label = "右电机", value = motorB, modifier = Modifier.fillMaxWidth())
+            SpeedSelector(
+                selected = speedLevel,
+                onSelect = onSpeedSelect,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -301,13 +302,14 @@ private fun SpeedSelector(
     onSelect: (SpeedLevel) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        colors   = CardDefaults.cardColors(containerColor = Color(0xE6111827)),
-        shape    = RoundedCornerShape(10.dp),
-        modifier = modifier
+    // 嵌入 MotorSpeedPanel Card 内部，不需要额外的 Card 包裹
+    Column(
+        modifier            = modifier,
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+        horizontalAlignment = Alignment.Start
     ) {
         Column(
-            modifier            = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier            = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(1.dp),
             horizontalAlignment = Alignment.Start
         ) {

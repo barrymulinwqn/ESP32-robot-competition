@@ -13,7 +13,7 @@ android {
         minSdk = 29          // Android 10+，需要 WifiNetworkSpecifier API
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0.5"
+        versionName = "1.0.6"
     }
 
     buildTypes {
