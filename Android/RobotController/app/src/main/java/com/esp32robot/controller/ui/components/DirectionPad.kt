@@ -1,5 +1,7 @@
 package com.esp32robot.controller.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.esp32robot.controller.viewmodel.DirectionZone
+import com.esp32robot.controller.viewmodel.SpeedLevel
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.min
@@ -93,6 +96,7 @@ private fun angleToZone(angleDeg: Float): DirectionZone {
 @Composable
 fun DirectionPad(
     modifier: Modifier = Modifier,
+    speedLevel: SpeedLevel = SpeedLevel.MEDIUM,
     onZonePress: (DirectionZone) -> Unit = {},
     onZoneRelease: () -> Unit = {}
 ) {
@@ -102,19 +106,88 @@ fun DirectionPad(
     var pressedZone by remember { mutableStateOf<DirectionZone?>(null) }
     val textMeasurer = rememberTextMeasurer()
 
-    // ── 配色 ────────────────────────────────────────────────────
-    val colorBg           = Color(0xFF0D1117)  // 深黑蓝背景
-    val colorCardinalNorm = Color(0xFF1B3A5C)  // 主方向（前/后/左旋/右旋）正常色
-    val colorCardinalPrs  = Color(0xFF1565C0)  // 主方向按下高亮
-    val colorDiagNorm     = Color(0xFF142840)  // 斜向（转弯）正常色
-    val colorDiagPrs      = Color(0xFF0D47A1)  // 斜向按下高亮
-    val colorCenterNorm   = Color(0xFFE53935)  // 急停圆正常（红）
-    val colorCenterPrs    = Color(0xFFB71C1C)  // 急停圆按下（深红）
-    val colorBorderOuter  = Color(0xFF2196F3)  // 外圆边框
-    val colorBorderInner  = Color(0xFF1565C0)  // 内圆边框
-    val colorTextPrimary  = Color(0xFFE0E0E0)  // 箭头文字
-    val colorTextSub      = Color(0xFFB0BEC5)  // 功能标签文字
-    val colorTextCenter   = Color(0xFFFFFFFF)  // 急停文字
+    // ── 配色（随速度级别动态切换，300ms 过渡动画）─────────────────
+    //   LOW  : 绿色主题  — 背景深绿，边框亮绿，急停圆保持红色（高对比）
+    //   MEDIUM: 蓝色主题  — 保持原有蓝色配色
+    //   HIGH : 红色主题  — 背景深红，边框亮红，急停圆改为橙色（防止与背景混淆）
+    val colorBg by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF051209)   // 近黑，绿色底调
+            SpeedLevel.MEDIUM -> Color(0xFF0D1117)   // 近黑，蓝色底调
+            SpeedLevel.HIGH   -> Color(0xFF0E0607)   // 近黑，红色底调
+        }, animationSpec = tween(300), label = "padBg"
+    )
+    val colorCardinalNorm by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF163D1C)   // 深森林绿
+            SpeedLevel.MEDIUM -> Color(0xFF1B3A5C)   // 深海军蓝
+            SpeedLevel.HIGH   -> Color(0xFF3D1212)   // 深暗红
+        }, animationSpec = tween(300), label = "padCardinalNorm"
+    )
+    val colorCardinalPrs by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF2E7D32)   // 中绿按下
+            SpeedLevel.MEDIUM -> Color(0xFF1565C0)   // 中蓝按下
+            SpeedLevel.HIGH   -> Color(0xFF8B0000)   // 深红按下
+        }, animationSpec = tween(300), label = "padCardinalPrs"
+    )
+    val colorDiagNorm by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF0F2D14)   // 更深森林绿
+            SpeedLevel.MEDIUM -> Color(0xFF142840)   // 更深海军蓝
+            SpeedLevel.HIGH   -> Color(0xFF2D0C0C)   // 更深暗红
+        }, animationSpec = tween(300), label = "padDiagNorm"
+    )
+    val colorDiagPrs by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF1B5E20)   // 深绿按下
+            SpeedLevel.MEDIUM -> Color(0xFF0D47A1)   // 深蓝按下
+            SpeedLevel.HIGH   -> Color(0xFF680000)   // 极深红按下
+        }, animationSpec = tween(300), label = "padDiagPrs"
+    )
+    // 急停圆：高速时改用橙色，避免与深红背景对比度不足
+    val colorCenterNorm by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.HIGH -> Color(0xFFFF6D00)     // 橙色（高对比）
+            else            -> Color(0xFFE53935)     // 红色
+        }, animationSpec = tween(300), label = "padCenterNorm"
+    )
+    val colorCenterPrs by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.HIGH -> Color(0xFFE65100)     // 深橙按下
+            else            -> Color(0xFFB71C1C)     // 深红按下
+        }, animationSpec = tween(300), label = "padCenterPrs"
+    )
+    val colorBorderOuter by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF4CAF50)   // 亮绿边框
+            SpeedLevel.MEDIUM -> Color(0xFF2196F3)   // 亮蓝边框
+            SpeedLevel.HIGH   -> Color(0xFFEF5350)   // 亮红边框
+        }, animationSpec = tween(300), label = "padBorderOuter"
+    )
+    val colorBorderInner by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFF2E7D32)   // 中绿内边框
+            SpeedLevel.MEDIUM -> Color(0xFF1565C0)   // 中蓝内边框
+            SpeedLevel.HIGH   -> Color(0xFFB71C1C)   // 深红内边框
+        }, animationSpec = tween(300), label = "padBorderInner"
+    )
+    // 文字随主题微调，保持高可读性
+    val colorTextPrimary by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFFE8F5E9)   // 近白，绿色微调
+            SpeedLevel.MEDIUM -> Color(0xFFE0E0E0)   // 近白，中性
+            SpeedLevel.HIGH   -> Color(0xFFFFEBEE)   // 近白，红色微调
+        }, animationSpec = tween(300), label = "padTextPrimary"
+    )
+    val colorTextSub by animateColorAsState(
+        targetValue = when (speedLevel) {
+            SpeedLevel.LOW    -> Color(0xFFA5D6A7)   // 浅绿标签
+            SpeedLevel.MEDIUM -> Color(0xFFB0BEC5)   // 浅灰蓝标签
+            SpeedLevel.HIGH   -> Color(0xFFEF9A9A)   // 浅红标签
+        }, animationSpec = tween(300), label = "padTextSub"
+    )
+    val colorTextCenter = Color(0xFFFFFFFF)           // 急停文字始终白色
 
     Canvas(
         modifier = modifier
@@ -229,8 +302,8 @@ fun DirectionPad(
             val arrowLayout = textMeasurer.measure(
                 text  = cfg.arrow,
                 style = TextStyle(
-                    fontSize   = 20.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize   = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     color      = colorTextPrimary
                 )
             )
@@ -238,8 +311,9 @@ fun DirectionPad(
             val subLayout = textMeasurer.measure(
                 text  = cfg.label,
                 style = TextStyle(
-                    fontSize = 10.sp,
-                    color    = colorTextSub
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = colorTextSub
                 )
             )
 
@@ -257,8 +331,8 @@ fun DirectionPad(
         val stopLayout = textMeasurer.measure(
             text  = "急停",
             style = TextStyle(
-                fontSize   = 14.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize   = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
                 color      = colorTextCenter
             )
         )

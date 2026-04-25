@@ -3,6 +3,7 @@ package com.esp32robot.controller.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,14 +59,14 @@ import kotlin.math.abs
  * ControlScreen — 九宫格方向盘竞赛控制界面（横屏）
  *
  * 布局（横屏）：
- * ┌──────────────┬────────────────────────────────┬──────────────┐
- * │  [电机转速]  │                                │  [连接状态]  │
- * │  左: ████░   │         ┌───────────┐          │  [连接/断开] │
- * │  右: ██░░░   │         │ ↖  ↑  ↗   │          │  [激光开关]  │
- * │  [速度级别]  │         │ ←  ●  →   │          │  [命中次数]  │
- * │  ○低 ●中 ○高 │         │ ↙  ↓  ↘   │          │             │
- * │              │         └───────────┘          │  [■ 急  停] │
- * └──────────────┴────────────────────────────────┴──────────────┘
+ * ┌────────────────────────────────┬──────────────┬──────────────┐
+ * │                                │  [电机转速]  │  [连接状态]  │
+ * │         ┌───────────┐          │  左: ████░   │  [连接/断开] │
+ * │         │ ↖  ↑  ↗   │          │  右: ██░░░   │  [激光开关]  │
+ * │         │ ←  ●  →   │          │  [速度级别]  │  [命中次数]  │
+ * │         │ ↙  ↓  ↘   │          │  ○低 ●中 ○高 │             │
+ * │         └───────────┘          │              │  [■ 急  停] │
+ * └────────────────────────────────┴──────────────┴──────────────┘
  */
 @Composable
 fun ControlScreen(viewModel: RobotViewModel) {
@@ -89,16 +90,7 @@ fun ControlScreen(viewModel: RobotViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // ── 左侧：电机转速面板 + 速度选择器（22%）──────────────
-            MotorSpeedPanel(
-                motorA     = motorA,
-                motorB     = motorB,
-                speedLevel = speedLevel,
-                onSpeedSelect = { viewModel.setSpeedLevel(it) },
-                modifier   = Modifier.weight(0.22f).fillMaxHeight()
-            )
-
-            // ── 中央：方向盘（50%）──────────────────────────────────
+            // ── 左侧：方向盘（50%）──────────────────────────────────
             Box(
                 modifier        = Modifier.weight(0.50f).fillMaxHeight(),
                 contentAlignment = Alignment.Center
@@ -107,10 +99,20 @@ fun ControlScreen(viewModel: RobotViewModel) {
                     modifier = Modifier
                         .fillMaxHeight()
                         .aspectRatio(1f),
+                    speedLevel    = speedLevel,
                     onZonePress   = { zone -> if (isConnected) viewModel.sendDirection(zone) },
                     onZoneRelease = { viewModel.releaseDirection() }
                 )
             }
+
+            // ── 中央：电机转速面板 + 速度选择器（22%）──────────────
+            MotorSpeedPanel(
+                motorA     = motorA,
+                motorB     = motorB,
+                speedLevel = speedLevel,
+                onSpeedSelect = { viewModel.setSpeedLevel(it) },
+                modifier   = Modifier.weight(0.22f).fillMaxHeight()
+            )
 
             // ── 右侧：连接与功能控制（28%）──────────────────────────
             Column(
@@ -152,21 +154,21 @@ fun ControlScreen(viewModel: RobotViewModel) {
                 )
                 Button(
                     onClick  = { viewModel.toggleLaser() },
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     colors   = ButtonDefaults.buttonColors(containerColor = laserBg),
                     shape    = RoundedCornerShape(10.dp)
                 ) {
                     Icon(
                         imageVector        = if (laserOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
                         contentDescription = "激光",
-                        modifier           = Modifier.size(18.dp),
+                        modifier           = Modifier.size(26.dp),
                         tint               = Color.White
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text       = if (laserOn) "激光  ON" else "激光 OFF",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize   = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontSize   = 18.sp,
                         color      = Color.White
                     )
                 }
@@ -176,8 +178,6 @@ fun ControlScreen(viewModel: RobotViewModel) {
                     onReset  = { viewModel.resetIrCount() },
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(Modifier.weight(1f))
 
                 // 急停（大红，置底）
                 Button(
@@ -229,7 +229,7 @@ private fun MotorSpeedPanel(
         ) {
             Text(
                 text          = "电 机 转 速",
-                fontSize      = 11.sp,
+                fontSize      = 13.sp,
                 color         = Color(0xFF78909C),
                 fontWeight    = FontWeight.SemiBold,
                 letterSpacing = 1.5.sp
@@ -239,7 +239,7 @@ private fun MotorSpeedPanel(
             SpeedSelector(
                 selected = speedLevel,
                 onSelect = onSpeedSelect,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().weight(1f)
             )
         }
     }
@@ -265,27 +265,27 @@ private fun MotorSpeedBar(
         else      -> "▼ 后退"
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
-            Text(label,    fontSize = 11.sp, color = Color(0xFF78909C), fontWeight = FontWeight.Medium)
-            Text(dirLabel, fontSize = 10.sp, color = barColor)
+            Text(label,    fontSize = 13.sp, color = Color(0xFF78909C), fontWeight = FontWeight.Medium)
+            Text(dirLabel, fontSize = 12.sp, color = barColor)
         }
         LinearProgressIndicator(
             progress   = { fraction },
             modifier   = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
-                .clip(RoundedCornerShape(5.dp)),
+                .height(12.dp)
+                .clip(RoundedCornerShape(6.dp)),
             color      = barColor,
             trackColor = Color(0xFF1E2A3A)
         )
         Text(
-            text      = "${(fraction * 100).toInt()}%",
-            fontSize  = 10.sp,
+            text      = "${abs(value)}/255",
+            fontSize  = 12.sp,
             color     = barColor,
             fontWeight = FontWeight.Bold,
             modifier  = Modifier.fillMaxWidth(),
@@ -305,17 +305,17 @@ private fun SpeedSelector(
     // 嵌入 MotorSpeedPanel Card 内部，不需要额外的 Card 包裹
     Column(
         modifier            = modifier,
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalAlignment = Alignment.Start
     ) {
         Column(
-            modifier            = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(1.dp),
+            modifier            = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
             horizontalAlignment = Alignment.Start
         ) {
             Text(
                 text          = "速度级别",
-                fontSize      = 10.sp,
+                fontSize      = 12.sp,
                 color         = Color(0xFF78909C),
                 fontWeight    = FontWeight.SemiBold,
                 letterSpacing = 0.5.sp
@@ -329,12 +329,15 @@ private fun SpeedSelector(
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier          = Modifier.height(30.dp)
+                    modifier          = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clickable { onSelect(level) }
                 ) {
                     RadioButton(
                         selected = isSelected,
                         onClick  = { onSelect(level) },
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(24.dp),
                         colors   = RadioButtonDefaults.colors(
                             selectedColor   = levelColor,
                             unselectedColor = Color(0xFF455A64)
@@ -343,18 +346,17 @@ private fun SpeedSelector(
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text       = level.label,
-                        fontSize   = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize   = 14.sp,
+                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
                         color      = if (isSelected) levelColor else Color(0xFF607D8B)
                     )
-                    if (isSelected) {
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text  = "(${level.pwm})",
-                            fontSize = 9.sp,
-                            color = levelColor.copy(alpha = 0.65f)
-                        )
-                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text       = "${level.pwm}/255",
+                        fontSize   = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color      = levelColor.copy(alpha = if (isSelected) 1f else 0.55f)
+                    )
                 }
             }
         }
