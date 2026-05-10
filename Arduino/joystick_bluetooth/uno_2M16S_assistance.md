@@ -357,7 +357,7 @@
 │          2 Motor && 16 Servo Drive Board（2M16S）                │
 │  · PS2 硬连接（不可重映射）                                      │
 │  · 内置 H 桥差速驱动双电机                                       │
-│  · 通过 SoftwareSerial TX → UNO Pin 4 发送手柄状态帧            │
+│  · 硬件 UART D1(TX) → UNO Pin 4（SoftSerial RX）发送状态帧      │
 └────────┬──────────────────────┬───────────────────────────────────┘
          │ H 桥直驱              │ UART TX（5V TTL，115200 bps）
     ┌────┴────┐                  ▼
@@ -371,7 +371,7 @@ DC 12V     DC 12V    │  · 激光发射控制（38 kHz PWM）       │
                                 ▼                ▼
                          激光发射器          VS1838B
                          980nm 30mW         激光接收器
-                         100kHz TTL         38kHz 解调
+                         38kHz TTL          38kHz 解调
 ```
 
 ---
@@ -433,7 +433,7 @@ DC 12V     DC 12V    │  · 激光发射控制（38 kHz PWM）       │
   │  │         D7/D8 = M2 方向 A/B，D9(PWM) = M2 速度                    │   │
   │  └────────────────────────────────────────────────────────────────────┘   │
   │                                                                            │
-  │  ┌─── UART 与 Digital PWM UNO 通信（SoftwareSerial）───────────────────┐  │
+  │  ┌─── 硬件 UART 与 Digital PWM UNO 通信（D1/TX → UNO Pin4，115200 bps）┐  │
   │  │  D1 (TX) ──────────────────────────────► UNO Pin 4（SoftSerial RX） │  │
   │  │  D0 (RX) ◄──────────────────────────── UNO Pin 5（SoftSerial TX）  │  │
   │  │  5V      ──────────────────────────────► UNO 5V（为 UNO 供电）      │  │
