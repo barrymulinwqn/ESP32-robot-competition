@@ -20,11 +20,11 @@
    舵机1~16 ──────►│ [S1]~[S16]    16路舵机信号输出（PWM）               │
                   │              每路 3 针：GND / VCC(5V) / SIG          │
                   │                                                      │
-   与UNO通信 ─────►│ [I2C: SDA/SCL] 或 UART [TX/RX]                    │
+   与UNO通信 ─────►│ [I2C: SDA/SCL]                                     │
                   │  （默认 I2C 地址 0x40，可通过 A0~A4 跳线更改）        │
                   │                                                      │
-   固件烧录 ──────►│ [ISP Header]: MOSI/MISO/SCK/RST/VCC/GND (6-pin)   │
-                  │  或板载 Micro-USB / USB-C（视版本而定）              │
+   固件烧录 ──────►│ ⚠️ 板上无 USB-B 也无 ISP Header，须用 USB-to-TTL   │
+                  │    串口适配器连接板上 TX/RX/RST/GND 引脚单独烧录    │
                   └──────────────────────────────────────────────────────┘
 ```
 
@@ -80,26 +80,7 @@
 - 默认 **I2C 地址：0x40**
 - 可通过板上 A0～A4 焊点/跳线修改地址（最多支持 32 个板级联）
 
-#### ⑤ ISP 烧录接口（固件烧录用）
-
-位于板上的 **6针 ISP 排针**，用于 AVR ISP 编程器烧录固件：
-
-```
-  ┌──────────────────┐
-  │ MISO  VCC        │
-  │ SCK   MOSI       │
-  │ RST   GND        │
-  └──────────────────┘
-```
-
-| 针脚 | 功能 |
-|------|------|
-| VCC  | 3.3V 或 5V 供电（由编程器提供） |
-| GND  | 地 |
-| MOSI | 主机数据输出→从机数据输入 |
-| MISO | 从机数据输出→主机数据输入 |
-| SCK  | SPI 时钟 |
-| RST  | 复位（低电平有效） |
+> ⚠️ **注意**：经核对 `2M16S_final.jpg`，该板**没有 USB-B 接口，也没有 ISP Header 烧录接口**。2M16S 拥有独立的 ATmega328P MCU，**必须单独烧录**，不能通过叠插 UNO 的 USB-B 接口一并写入（UNO 的 USB-B 只能访问 UNO 自身的 MCU）。唯一可行的烧录方式为：使用 **USB-to-TTL 串口适配器**连接 2M16S 板上的 TX/RX/RST/GND 引脚，通过板载 optiboot Bootloader 上传固件。详见第三章 3.2 节。
 
 ---
 
@@ -112,7 +93,7 @@
                 │                  Arduino UNO (Digital PWM UNO)          │
                 │                                                         │
   USB-B 供电/   │ ┌──────┐                                               │
-  固件烧录 ─────►│ │USB-B │   (内置 CH340/ATmega16U2 作 USB-串口桥接)     │
+  固件烧录 ─────►│ │USB-B │   (内置 CH340 作 USB-串口桥接)                │
                 │ └──────┘                                               │
                 │                                                         │
   DC 电源 ──────►│ [DC 2.1mm 插座]  7～12V                               │
@@ -135,8 +116,8 @@
 
 | 引脚 | 特殊功能 | 说明 |
 |------|---------|------|
-| D0 (RX) | UART 接收 | 与 USB 串口共用，烧录时勿占用 |
-| D1 (TX) | UART 发送 | 与 USB 串口共用，烧录时勿占用 |
+| D0 (RX) | UART 接收 | 与 USB 串口共用；本项目中未接外部设备，烧录时无干扰 |
+| D1 (TX) | UART 发送 | 与 USB 串口共用；本项目中未接外部设备，烧录时无干扰 |
 | D2  | 外部中断 INT0 | 数字输入/输出 |
 | D3  ★ | PWM + INT1 | PWM 输出（490Hz） |
 | D4  | — | 数字输入/输出 |
@@ -160,8 +141,10 @@
 | A1 | 模拟输入 | 同上 |
 | A2 | 模拟输入 | 同上 |
 | A3 | 模拟输入 | 同上 |
-| A4 | 模拟输入 / **I2C SDA** | 与 2M16S 通信数据线 |
-| A5 | 模拟输入 / **I2C SCL** | 与 2M16S 通信时钟线 |
+| A4 | 模拟输入 / I2C SDA | 本项目中仅用作模拟输入，未使用 I2C |
+| A5 | 模拟输入 / I2C SCL | 本项目中仅用作模拟输入，未使用 I2C |
+
+> ⚠️ **本项目 UNO 与 2M16S 之间通过 SoftwareSerial（Pin 4 RX / Pin 5 TX）通信，并非 I2C。** A4/A5 在本项目中未使用。
 
 #### ③ 电源引脚
 
@@ -178,10 +161,11 @@
 - 连接电脑后通过 **Arduino IDE** 自动识别为串口（COMx / /dev/ttyUSB0 / /dev/tty.usbserial-xxx）
 - 内置自动复位电路，烧录时 IDE 自动拉低 DTR 触发复位，无需手动按 RST
 - 通信协议：**115200 baud**（默认）
+- **本固件使用 SoftwareSerial（Pin 4 / Pin 5）与 2M16S 通信**，硬件 UART（D0/D1）保留给 USB 调试，**烧录时无需断开任何外部连线**
 
 #### ⑤ ISP 六针烧录接口
 
-同 2M16S，引脚定义如下：
+引脚定义如下：
 
 ```
   ┌──────────────────┐
@@ -201,6 +185,8 @@
 
 #### 方法一：USB-B 接口（推荐，最简单）
 
+> ⚠️ **macOS 用户须先安装 CH340 驱动**：macOS 12（Monterey）及以上版本默认不含 CH340 驱动，接上 USB-B 线后端口不会出现。请先从 WCH 官网下载并安装 `CH34x_Install_V1.x.pkg`（[下载地址](https://www.wch-ic.com/downloads/CH341SER_MAC_ZIP.html)），安装后重启系统再连接 UNO。
+
 1. 用 **USB-A to USB-B** 数据线连接 UNO 与电脑
 2. 打开 **Arduino IDE**
 3. 选择：
@@ -212,8 +198,10 @@
 ```
 电脑 USB-A  ──── USB-B 数据线 ────►  UNO USB-B 接口
                                      ↓
-                               自动触发复位 → 烧录 Bootloader → 写入固件
+                        IDE 拉低 DTR → 自动复位 → 激活 Bootloader → 写入固件
 ```
+
+> ✅ **无需断开任何连线**：本固件使用 SoftwareSerial（Pin 4/5），D0/D1 不被占用，连着外部电路也可正常烧录。
 
 #### 方法二：ISP 六针接口（需外部编程器）
 
@@ -227,81 +215,100 @@
 
 ### 3.2 2M16S 固件烧录
 
-#### 方法一：通过板载 Micro-USB / USB-C 接口（若板载 USB 芯片支持）
+#### 📋 烧录方式选择说明
 
-1. 用 USB 线连接 2M16S 板与电脑
-2. Arduino IDE 选择对应开发板（通常为 `Arduino Pro Mini` 或板载 MCU 型号）
-3. 选择正确串口，打开 `2M16S_firmware/2M16S_firmware.ino`
-4. 点击上传
+经核对 `2M16S_final.jpg`，2M16S 板上：
+- ❌ **无 USB-B 接口**：无法像 UNO 一样直接插 USB 线烧录
+- ❌ **无 ISP Header**：无法使用 USBasp/AVRISP mkII 等编程器
+- ❌ **无法通过叠插 UNO 的 USB-B 接口烧录**：UNO 的 USB-B 只能访问 UNO 自身的 ATmega328P，**不能跨板写入 2M16S 上独立的 MCU**
+- ✅ **唯一可行方法：USB-to-TTL 串口适配器**（CH340/CP2102/FT232 均可），通过板上 UART 引脚（TX/RX）配合 optiboot Bootloader 烧录
 
-#### 方法二：通过 ISP 六针接口烧录（推荐，确保稳定）
+> ℹ️ **2M16S 出厂已预烧录 optiboot Bootloader**，支持通过串口 Bootloader 方式上传 `.ino` 固件，原理与 UNO 完全相同，只是没有板载 USB 桥接芯片，需外接 USB-to-TTL 适配器替代。
 
-根据 `2M16S_final.jpg` 中可见的 **6针 ISP Header**：
+#### 为什么 USB-to-TTL 方法是唯一实用选择？
+
+| 对比项 | 通过 UNO USB-B 烧录 2M16S | USB-to-TTL 串口适配器 |
+|--------|--------------------------|---------------------|
+| 是否可行 | ❌ **完全不可行**，UNO USB-B 只能烧录 UNO 自身 MCU | ✅ **唯一正确方法** |
+| 所需硬件 | — | USB-to-TTL 适配器（CH340G 最常见，约 ¥5～¥30） |
+| 操作难度 | — | 低，4 根杜邦线接好，步骤与烧录 UNO 相同 |
+| 是否需断线 | — | 需暂时断开 2M16S 与 UNO 之间的 TX/RX 连线 |
+| 自动复位 | — | DTR/RTS 引脚串接 100nF 电容实现自动复位；无该引脚则手动按 RST |
+
+**结论：USB-to-TTL 串口适配器是烧录 2M16S 的唯一实用方法。**
+
+---
+
+#### ⚠️ 烧录前必须断开与 UNO 的连线
+
+2M16S 的 **Pin 0（RX）/ Pin 1（TX）** 在运行时连接 UNO，烧录时这两根线会干扰 Bootloader 握手，**必须先断开**：
+
+| 需断开的连线 | 说明 |
+|------------|------|
+| 2M16S Pin 1 (TX) ↔ UNO Pin 4 | 运行时发数据给 UNO，烧录时干扰 RX |
+| 2M16S Pin 0 (RX) ↔ UNO Pin 5 | 运行时收 UNO 数据，烧录时干扰 TX |
+
+#### 烧录步骤（USB-to-TTL 适配器）
+
+1. **断开** 2M16S 与 UNO 之间 Pin 0/1 的连线
+2. 按如下接线连接 USB-to-TTL 适配器与 2M16S：
+
+| USB-TTL 适配器引脚 | 2M16S 引脚 | 说明 |
+|------------------|----------|------|
+| TX               | Pin 0 (RX) | 适配器发 → 2M16S 收 |
+| RX               | Pin 1 (TX) | 2M16S 发 → 适配器收 |
+| GND              | GND        | 共地（必须连接） |
+| DTR 或 RTS（可选） | RST（串接 100nF 电容） | 实现自动复位（推荐） |
 
 ```
-  USBasp / AVRISP mkII
-       ↓
-  ┌──────────────────┐
-  │ MISO  VCC  ──────┼──► 2M16S ISP Header
-  │ SCK   MOSI ──────┼──►  (6-pin, 对准缺口方向)
-  │ RST   GND  ──────┼──►
-  └──────────────────┘
+电脑 USB-A  ── USB-to-TTL 适配器 ──► TX → 2M16S Pin0(RX)
+                                     RX ← 2M16S Pin1(TX)
+                                     GND ── 2M16S GND
+                                     DTR ─[100nF]─► 2M16S RST
+                                          ↓
+                           DTR 自动拉低 RST → 激活 optiboot → 写入固件
 ```
 
-**步骤：**
-1. 断开 2M16S 与 UNO 的 I2C 连接
-2. 将外部编程器接至 2M16S 的 ISP Header（注意 VCC 方向，通常针1为 MISO，PIN1标记三角形）
-3. 为 2M16S 提供独立电源（VIN 接 7~12V）或由编程器 VCC 供电（5V 时注意电流限制）
-4. Arduino IDE 或 avrdude 命令行：
-   ```bash
-   avrdude -c usbasp -p atmega328p -U flash:w:2M16S_firmware.hex:i
-   ```
-5. 烧录完成后断开编程器，重新连接 I2C 至 UNO
+> 若 USB-to-TTL 适配器无 DTR/RTS 引脚，上传进度条出现的瞬间**手动快速按一下 2M16S 的 RST 按钮**触发复位。
 
-#### 方法三：用另一块 Arduino UNO 作为 ISP 编程器
-
-1. 先在 UNO 上烧录 `ArduinoISP` 示例草图（`文件 → 示例 → 11.ArduinoISP → ArduinoISP`）
-2. 按如下连接 UNO → 2M16S ISP Header：
-
-| UNO 引脚 | 2M16S ISP 针脚 |
-|---------|--------------|
-| D10    | RST          |
-| D11 (MOSI) | MOSI    |
-| D12 (MISO) | MISO    |
-| D13 (SCK)  | SCK     |
-| 5V     | VCC          |
-| GND    | GND          |
-
-3. Arduino IDE 中选择 `工具 → 编程器 → Arduino as ISP`
-4. 选择 2M16S 对应目标芯片（如 `ATmega328P`）
-5. `草图 → 通过编程器上传`
+3. 打开 **Arduino IDE**，选择：
+   - `工具 → 开发板 → Arduino AVR Boards → Arduino Uno`（ATmega328P @ 16 MHz）
+   - `工具 → 端口` → 选择 USB-to-TTL 适配器对应的串口（如 `/dev/tty.usbserial-xxxx` 或 `COMx`）
+4. 打开固件文件 `2M16S_firmware/2M16S_firmware.ino`
+5. 安装依赖库：`工具 → 管理库` → 搜索并安装 **`PS2X_lib`**（by Bill Porter）
+6. 点击 **上传（→）**，等待 "Done uploading"
+7. 烧录完成后，**重新连接** 2M16S Pin 0/1 至 UNO Pin 5/4
 
 ---
 
 ## 四、UNO 与 2M16S 接线汇总
 
 ```
-  Arduino UNO              2M16S Board
-  ┌──────────┐             ┌─────────────┐
-  │ A4 (SDA) ├────────────►│ SDA         │
-  │ A5 (SCL) ├────────────►│ SCL         │
-  │ GND      ├────────────►│ GND         │
-  │ 5V       ├────────────►│ VCC (逻辑)  │ ← 可选，2M16S 独立供电时不需要
-  └──────────┘             │             │
-                           │ VIN ◄───────┼── 外部 7~12V 电源（电机+舵机）
-                           │ MA1/MA2 ────┼── 电机 A
-                           │ MB1/MB2 ────┼── 电机 B
-                           │ S1~S16 ─────┼── 舵机 1~16
-                           └─────────────┘
+  Arduino UNO（Digital PWM UNO）        2M16S Board
+  ┌──────────────┐                      ┌─────────────────┐
+  │ Pin 4 (SS_RX)│◄─────────────────────┤ Pin 1 (TX)      │  手柄状态帧 →
+  │ Pin 5 (SS_TX)├─────────────────────►│ Pin 0 (RX)      │  ← 命中计数帧
+  │ Pin 2 (INT0) │◄── VS1838B OUT        │                 │
+  │ Pin 9 (PWM)  ├──► 激光 TTL           │ VIN ◄───────────┼── 外部 7~12V
+  │ GND          ├─────────────────────►│ GND             │
+  │ 5V           ├─────────────────────►│ VCC（逻辑）      │ ← 可选
+  └──────────────┘                      │ MA1/MA2 ────────┼── 电机 A
+                                        │ MB1/MB2 ────────┼── 电机 B
+                                        │ Pin10←CLK       │
+                                        │ Pin11←CS        │ ← YFRobot 2015
+                                        │ Pin12←CMD       │   手柄解码器
+                                        │ Pin13←DAT       │
+                                        └─────────────────┘
 ```
+
+> **通信说明**：UNO 使用 `SoftwareSerial`（Pin 4 RX / Pin 5 TX，115200 bps）接收 2M16S 发来的手柄状态帧，并回传激光命中计数。**两板之间不使用 I2C，A4/A5 在本项目中未占用。**
 
 ---
 
 ## 五、注意事项
 
-1. **共地（GND）必须连接**：UNO 与 2M16S 之间的 GND 必须相连，否则 I2C 通信异常。
+1. **共地（GND）必须连接**：UNO 与 2M16S 之间的 GND 必须相连，否则 SoftwareSerial 串口通信异常（电平参考错位）。
 2. **电源分离**：建议大电流（电机/舵机）由独立电源供给 VIN，逻辑 VCC 可由 UNO 5V 提供。
 3. **烧录前断开电机**：烧录固件时建议断开电机，防止误触发。
 4. **ISP 接口方向**：ISP Header 针1通常以白色/三角形标记，接错会损坏器件。
-5. **I2C 地址冲突**：若连接多块 2M16S，需通过焊盘配置不同 I2C 地址（默认 0x40）。
-6. **USB-B 烧录时勿占用 D0/D1**：这两个引脚与 USB 串口复用，会导致烧录失败。
+5. **USB-B 烧录时勿占用 D0/D1**：这两个引脚与 USB 串口复用，会导致烧录失败。
