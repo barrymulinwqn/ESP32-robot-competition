@@ -269,31 +269,165 @@
 
 ### 3.2 2M16S 固件烧录
 
-#### 📋 烧录方式选择说明
+> ⚠️ **重要前提：本节分两个阶段。**
+> - **阶段一（3.2.1）**：若板上尚无 Bootloader（出厂空片），必须先通过 **ISP 方式烧录 optiboot Bootloader**，之后方可进行阶段二。
+> - **阶段二（3.2.2）**：Bootloader 已就绪后，通过 **USB-to-TTL 适配器** 上传 `.ino` 固件（日常开发更新均走此流程）。
+
+---
+
+#### 3.2.1 🔧 烧录 optiboot Bootloader（首次必做，板无 Bootloader 时）
+
+> 若板上已有 Bootloader（可直接上传固件），跳过本节，直接进入 **3.2.2**。
+
+**为什么需要单独烧录 Bootloader？**
+UART 串口上传固件的前提是板上已有 optiboot Bootloader。如果 MCU 是空片，USB-to-TTL 适配器无法直接写入固件——必须先用 **ISP（In-System Programming）方式** 烧录 Bootloader。
+
+---
+
+**关于 2M16S 板上有无专用 ISP Header：**
+
+| 板卡版本 | ISP Header | 建议方法 |
+|---------|-----------|---------|
+| 带 USB-B（CH340）+ ISP 6-Pin 座（部分出厂版本） | ✅ 有 | 直接用 USBasp/AVRISP mkII 接 ISP 座 |
+| 仅有 UART Header（本项目核对版本） | ❌ 无独立 ISP 座 | 借用板上 **Arduino 兼容排针**（D11/D12/D13 即 MOSI/MISO/SCK + RESET 排针）实现 ISP |
+
+> 无论哪种版本，**ISP 信号都必须到达 ATmega328P 的 MOSI/MISO/SCK/RESET 引脚**，只是接入点不同。
+
+---
+
+##### 推荐方案：Arduino UNO 作 ISP 编程器（零额外成本）
+
+**所需物料：**
+- Arduino UNO（已有）+ USB-B 数据线
+- 10µF 电解电容 × 1（防止 UNO 自复位；正极接 UNO RESET，负极接 UNO GND）
+- 杜邦线 × 6 根
+
+**第一步：将 ArduinoISP 草图烧录到 UNO**
+1. 打开 Arduino IDE，选择 `文件 → 示例 → 11.ArduinoISP → ArduinoISP`
+2. 确认端口为 **UNO** 的串口，点击 **上传（→）**
+3. 上传完成后，UNO 变为 ISP 编程器，**不要再向 UNO 上传其他草图**，否则编程器功能丢失
+
+**第二步：接线 UNO（编程器）→ 2M16S（目标板）**
+
+> ⚠️ **接线前必须先断开 YFRobot 2015 PS2 解码器**（它占用了 2M16S 的 D10~D13），否则接线冲突
+
+| Arduino UNO 引脚 | 2M16S 引脚（Arduino 兼容排针） | ISP 信号 | 说明 |
+|:----------------:|:-----------------------------:|:-------:|------|
+| **D10** | **RESET**（模拟排针右侧） | RST | 目标 MCU 复位 |
+| **D11** | **D11** | MOSI | SPI 数据：主→从 |
+| **D12** | **D12** | MISO | SPI 数据：从→主 |
+| **D13** | **D13** | SCK | SPI 时钟 |
+| **5V** | **5V** | VCC | 供电（若 2M16S 已外部供电则可跳过） |
+| **GND** | **GND** | GND | 共地（必须连接） |
+| **RESET ↔ GND 之间加 10µF 电容（正极接 RESET）** | — | — | 防止 UNO 在编程时自复位 |
+
+```
+电脑 USB-A ──► Arduino UNO（已刷 ArduinoISP）
+                │  D10 ──────────────────► 2M16S RESET 排针
+                │  D11 ──────────────────► 2M16S D11（MOSI）
+                │  D12 ◄──────────────────  2M16S D12（MISO）
+                │  D13 ──────────────────► 2M16S D13（SCK）
+                │  5V  ──────────────────► 2M16S 5V
+                │  GND ──────────────────► 2M16S GND
+                │
+                UNO RESET ←[10µF+]──[10µF-]── UNO GND
+                （防止 IDE 上传时 UNO 自复位）
+```
+
+**第三步：Arduino IDE 烧录 Bootloader**
+1. Arduino IDE 菜单：`工具 → 开发板 → Arduino AVR Boards → Arduino Uno`
+2. `工具 → 编程器 → **Arduino as ISP**`（注意：不是"ArduinoISP"，是"Arduino as ISP"）
+3. 点击菜单 `工具 → **烧录引导程序（Burn Bootloader）**`
+4. 等待约 10~30 秒，IDE 底部显示 `Done burning bootloader` 即成功
+
+> ✅ 至此，2M16S 的 ATmega328P 已写入 optiboot Bootloader，接下来断开 ISP 接线，重新接好 YFRobot 2015 解码器，进入 **3.2.2** 阶段烧录固件。
+
+---
+
+##### 备选方案：USBasp 编程器（约 ¥15~30，操作更简单）
+
+| 步骤 | 操作 |
+|------|------|
+| 1 | 购买 USBasp（淘宝搜 "USBasp"），附带 6 针-6 针 IDC 排线 |
+| 2 | 按下表用杜邦线逐一飞线连接（详见下方 USBasp 全针脚对照表及 RES 接法） |
+| 3 | Arduino IDE：`工具 → 编程器 → USBasp` |
+| 4 | 点击 `工具 → 烧录引导程序（Burn Bootloader）` |
+
+> macOS 使用 USBasp 可能需要安装驱动：https://www.fischl.de/usbasp/
+
+---
+
+###### USBasp → 2M16S 全针脚对照表
+
+经核对 `2M16S_final.jpg`，本项目使用的 2M16S **只有 RESET 按钮，没有独立的 RESET 排针**，因此 USBasp 的 RES 线需飞线到按钮焊盘。其余五根线均接 Arduino 兼容排针。
+
+| USBasp 信号 | 2M16S 连接点 | 板上位置 | 说明 |
+|-------------|-------------|----------|------|
+| **MOSI** | **D11** | 上沿数字排针，丝印 11 | ISP 数据线：主机→目标芯片 |
+| **MISO** | **D12** | 上沿数字排针，丝印 12 | ISP 数据线：目标芯片→主机 |
+| **SCK**  | **D13** | 上沿数字排针，丝印 13 | ISP 时钟 |
+| **RES**  | **RESET 按钮 MCU 侧焊脚** | 板上贴片轻触按键 | 详见下方说明 |
+| **VCC (5V)** | **5V** | 下沿电源排针，丝印 5V | 为目标板供电；若板已外部供电则可不接，但 GND 必须接 |
+| **GND**  | **GND** | 下沿电源排针，丝印 GND | 共地，必须连接 |
+
+> ⚠️ **烧录前先断开占用 D11/D12/D13 的外设线**（手柄解码器 CS/CMD/DAT 占用这三根），否则总线冲突必然失败。
+
+---
+
+###### USBasp RES 如何接到 RESET 按钮（重点）
+
+2M16S 板上的 RESET 贴片轻触按键电路如下：
+
+```
+ATmega328P RESET 脚 ──[10kΩ 上拉]── 5V
+        │
+        └──── 按键 MCU 侧焊脚
+                   按键
+              按键 GND 侧焊脚 ──── GND
+```
+
+- 按键**未按下**时，RESET 被上拉电阻维持在约 5V（高电平 = 正常运行）。
+- 按键**按下**时，RESET 被拉低到 0V，芯片复位。
+- USBasp 的 RES 线与按键 MCU 侧共用同一网络，烧录时由 USBasp 主动拉低，效果与按键等价。
+
+**操作步骤：**
+
+1. 辨别按键的 MCU 侧：用万用表直流电压档，探针接按键任意一侧焊脚和 GND，**空闲时显示约 5V 的那侧即为 MCU 侧**（另一侧显示 0V，为 GND 侧，不要接）。
+2. 将 USBasp 的 RES 杜邦线**裸露出约 1mm 金属**，抵住 MCU 侧焊脚边沿，用镊子压住或细鳄鱼夹夹住固定。**无需焊接**。
+3. 再次确认：空闲时 RES 线对 GND 应为约 5V；点击烧录瞬间会短暂降到 0V 然后恢复。
+
+**常见错误：**
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| RES 线对 GND 一直 0V | 接到了按键 GND 侧 | 换到另一个焊脚（MCU 侧） |
+| RES 线对 GND 一直 5V，烧录无响应 | RES 线没有与焊脚接触 | 确认物理接触良好 |
+| 芯片一直在复位，无法通信 | RES 被意外短路到 GND | 检查是否接错焊脚或线碰到 GND |
+
+---
+
+#### 3.2.2 📋 烧录 2M16S 固件（已有 Bootloader 后）
 
 经核对 `2M16S_final.jpg`，2M16S 板上：
-- ❌ **无 USB-B 接口**：无法像 UNO 一样直接插 USB 线烧录
-- ❌ **无 ISP Header**：无法使用 USBasp/AVRISP mkII 等编程器
+- ❌ **无 USB-B 接口**：无法像 UNO 一样直接插 USB 线烧录固件
 - ❌ **无法通过叠插 UNO 的 USB-B 接口烧录**：UNO 的 USB-B 只能访问 UNO 自身的 ATmega328P，**不能跨板写入 2M16S 上独立的 MCU**
-- ✅ **唯一可行方法：USB-to-TTL 串口适配器**（CH340/CP2102/FT232 均可），通过板上 UART 引脚（TX/RX）配合 optiboot Bootloader 烧录
+- ✅ **固件烧录方法：USB-to-TTL 串口适配器**（CH340/CP2102/FT232 均可），通过板上 UART Header（TX/RX/GND）配合已写入的 optiboot Bootloader 上传 `.ino` 固件
 
-> ℹ️ **2M16S 出厂已预烧录 optiboot Bootloader**，支持通过串口 Bootloader 方式上传 `.ino` 固件，原理与 UNO 完全相同，只是没有板载 USB 桥接芯片，需外接 USB-to-TTL 适配器替代。
-
-#### 为什么 USB-to-TTL 方法是唯一实用选择？
+#### 为什么 USB-to-TTL 方法是固件烧录的正确选择？
 
 | 对比项 | 通过 UNO USB-B 烧录 2M16S | USB-to-TTL 串口适配器 |
 |--------|--------------------------|---------------------|
-| 是否可行 | ❌ **完全不可行**，UNO USB-B 只能烧录 UNO 自身 MCU | ✅ **唯一正确方法** |
+| 是否可行 | ❌ **完全不可行**，UNO USB-B 只能烧录 UNO 自身 MCU | ✅ **正确方法** |
 | 所需硬件 | — | USB-to-TTL 适配器（CH340G 最常见，约 ¥5～¥30） |
 | 操作难度 | — | 低，4 根杜邦线接好，步骤与烧录 UNO 相同 |
 | 是否需断线 | — | 需暂时断开 2M16S 与 UNO 之间的 TX/RX 连线 |
 | 自动复位 | — | ❌ UART Header 无 RST 引脚，**只能手动按板上 RST 按钮**触发复位 |
 
-**结论：USB-to-TTL 串口适配器是烧录 2M16S 的唯一实用方法。**
+**结论：USB-to-TTL 串口适配器 + 已有 optiboot Bootloader = 正确的固件烧录方法。**
 
 ---
 
-#### ⚠️ 烧录前必须断开与 UNO 的连线
+#### ⚠️ 固件烧录前必须断开与 UNO 的连线
 
 2M16S 的 **Pin 0（RX）/ Pin 1（TX）** 在运行时连接 UNO，烧录时这两根线会干扰 Bootloader 握手，**必须先断开**：
 
