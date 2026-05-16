@@ -93,8 +93,8 @@ class RobotWebSocketClient {
      */
     fun connect(
         context: Context,
-        ssid: String = "Robot-ESP32-Barry",
-        password: String = "rockwellrobot1234",
+        ssid: String = "Robot-ESP32-XXXXXX",
+        password: String = "12345678",
         wsUrl: String = "ws://192.168.4.1:81"
     ) {
         if (_connectionState.value is ConnectionState.Connecting ||

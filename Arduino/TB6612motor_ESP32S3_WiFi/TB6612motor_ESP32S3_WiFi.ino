@@ -53,8 +53,8 @@
 // ════════════════════════════════════════════════════════════════
 //  Wi-Fi AP 配置
 // ════════════════════════════════════════════════════════════════
-static const char* AP_SSID     = "Robot-ESP32-Barry";
-static const char* AP_PASSWORD = "rockwellrobot1234";    // 至少 8 位
+static const char* AP_SSID     = "Robot-ESP32-XXXXXX";
+static const char* AP_PASSWORD = "12345678";    // 至少 8 位
 
 // ════════════════════════════════════════════════════════════════
 //  引脚定义
