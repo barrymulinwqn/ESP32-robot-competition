@@ -71,6 +71,10 @@ class RobotWebSocketClient {
                         val ip = json.optString("ip", "192.168.4.1")
                         _connectionState.value = ConnectionState.Connected(ip)
                     }
+                    json.optString("status") == "rejected" -> {
+                        // ESP32 已被其他手机占用，拒绝本次连接
+                        _connectionState.value = ConnectionState.Error("机器人已被其他设备占用，请稍后重试")
+                    }
                 }
             } catch (_: Exception) {
                 // 忽略非 JSON 消息

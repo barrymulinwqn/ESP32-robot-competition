@@ -100,6 +100,10 @@ static const char* AP_PASSWORD = "12345678";    // 至少 8 位
 
 WebSocketsServer wsServer(WS_PORT);
 
+// 当前控制权持有者（-1 = 无人连接）
+// 一台机器人同一时刻只允许一部手机控制，防止竞赛中指令冲突
+static int8_t activeClientNum = -1;
+
 // ════════════════════════════════════════════════════════════════
 //  电机安全超时
 // ════════════════════════════════════════════════════════════════
@@ -217,12 +221,13 @@ static void broadcastIRCount() {
     uint32_t count = irCount;
     interrupts();
 
-    Serial.printf("[IR] Broadcast ir_count=%u\n", count);
+    if (activeClientNum < 0) return;    // 无活跃客户端时不发送
+    Serial.printf("[IR] Send ir_count=%u → active client #%d\n", count, activeClientNum);
     StaticJsonDocument<64> doc;
     doc["ir_count"] = count;
     char buf[64];
     serializeJson(doc, buf);
-    wsServer.broadcastTXT(buf);
+    wsServer.sendTXT((uint8_t)activeClientNum, buf);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -238,6 +243,23 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type,
             Serial.printf("[WS] Client #%u connected from %s\n",
                           clientNum, ip.toString().c_str());
 
+            if (activeClientNum >= 0) {
+                // 已有客户端占用控制权，拒绝新连接
+                Serial.printf("[WS] Rejected: client #%d already in control\n", activeClientNum);
+                StaticJsonDocument<64> doc;
+                doc["status"] = "rejected";
+                doc["reason"] = "Robot already in use";
+                char buf[64];
+                serializeJson(doc, buf);
+                wsServer.sendTXT(clientNum, buf);
+                wsServer.disconnect(clientNum);
+                break;
+            }
+
+            // 授予控制权
+            activeClientNum = (int8_t)clientNum;
+            Serial.printf("[WS] Client #%u granted control\n", clientNum);
+
             // 发送握手确认（包含 AP IP 和 SSID）
             StaticJsonDocument<128> doc;
             doc["status"] = "connected";
@@ -252,11 +274,17 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type,
         // ── 客户端断开（制动停车，防止失控滑行）────────────
         case WStype_DISCONNECTED:
             Serial.printf("[WS] Client #%u disconnected\n", clientNum);
-            brakeMotors();
+            if (clientNum == (uint8_t)activeClientNum) {
+                activeClientNum = -1;   // 释放控制权
+                brakeMotors();
+                Serial.println("[WS] Control released, motors braked");
+            }
             break;
 
         // ── 接收 JSON 文本指令 ────────────────────────────────
         case WStype_TEXT: {
+            // 忽略非活跃客户端的指令（不应发生，但防御性保留）
+            if (clientNum != (uint8_t)activeClientNum) break;
             Serial.printf("[WS #%u] RX: %.*s\n", clientNum, (int)length, (char*)payload);
             StaticJsonDocument<128> doc;
             DeserializationError err = deserializeJson(doc, payload, length);
@@ -374,8 +402,8 @@ void setup() {
         }
     });
 
-    // ── Wi-Fi AP 热点 ────────────────────────────────────────
-    WiFi.softAP(AP_SSID, AP_PASSWORD);
+    // ── Wi-Fi AP 热点（max_connection=1：WiFi 层也限制单设备接入）────
+    WiFi.softAP(AP_SSID, AP_PASSWORD, 1, false, 1);
     Serial.printf("[WiFi] AP started\n  SSID : %s\n  IP   : %s\n  Port : %d\n",
                   AP_SSID,
                   WiFi.softAPIP().toString().c_str(),

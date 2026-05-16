@@ -18,6 +18,11 @@
 9. [断开连接](#9-断开连接)
 10. [通信协议速查](#10-通信协议速查)
 11. [常见问题排查](#11-常见问题排查)
+12. [多机器人 / 多手机竞赛部署](#12-多机器人--多手机竞赛部署)
+    - [12.1 隔离原理：为什么不同手机互不影响](#121-隔离原理为什么不同手机互不影响)
+    - [12.2 单客户端保护机制](#122-单客户端保护机制)
+    - [12.3 竞赛部署操作步骤](#123-竞赛部署操作步骤)
+    - [12.4 被拒绝时的 App 提示](#124-被拒绝时的-app-提示)
 
 ---
 
@@ -445,3 +450,159 @@ ESP32 侧也有超时保护：若超过设定的 `MOTOR_TIMEOUT_MS` 毫秒未收
 | 模拟器（AVD）连接失败 | AVD 无物理 Wi-Fi 芯片，`TRANSPORT_WIFI` 不可用 | 必须使用真实 Android 10+ 手机 |
 | MIUI 弹出「无法上网」提示 | ESP32 AP 无互联网出口，MIUI 检测到后弹窗 | 点击「继续使用」，App 已绑定网络路由，不影响通信 |
 | MIUI 切后台后机器人失控 | MIUI 神隐模式/省电策略杀掉进程 | 设置 → 应用管理 → RobotController → 电池 → 无限制 |
+| 连接时提示「机器人已被其他设备占用」| ESP32 已有客户端持有控制权 | 等待该设备断开后再重试，或由管理员重启 ESP32 |
+
+---
+
+## 12. 多机器人 / 多手机竞赛部署
+
+> 本章说明在多队同场竞技时，如何正确配置、各队之间是否会互相干扰，以及固件层面的保护机制。
+
+---
+
+### 12.1 隔离原理：为什么不同手机互不影响
+
+**结论：只要每台 ESP32 使用唯一的 SSID，不同手机操控不同机器人，完全互不干扰。**
+
+每台 ESP32 以 AP（热点）模式独立运行，形成物理隔离的私有子网：
+
+```
+Phone A  ──(SSID: Robot-ESP32-AA1122)──► ESP32 #1  192.168.4.1
+Phone B  ──(SSID: Robot-ESP32-BB3344)──► ESP32 #2  192.168.4.1
+Phone C  ──(SSID: Robot-ESP32-CC5566)──► ESP32 #3  192.168.4.1
+```
+
+虽然三台手机的 `wsUrl` 均为 `ws://192.168.4.1:81`，但 `192.168.4.1` 在各自的私有子网内独立解析，分别指向不同的物理设备，网络层完全隔离。
+
+| 隔离维度 | 说明 |
+|---|---|
+| 网络层隔离 | 每个 ESP32 AP 是独立子网，不存在共享路由器 |
+| Android 路由绑定 | `WifiNetworkSpecifier` 按 SSID 匹配，`bindProcessToNetwork()` 将流量锁定到指定 AP |
+| 无公共基础设施 | 手机无法「越界」访问另一台 ESP32 |
+
+---
+
+### 12.2 单客户端保护机制
+
+**固件层面问题**：WebSocket 服务器（`arduinoWebSockets` 库）默认允许多个客户端同时连接同一台机器人。若两部手机因 SSID 误配置同时连入同一台 ESP32，将出现：
+
+- 两部手机的 `motor` 指令互相覆盖 → 机器人行为紊乱
+- 任意一部手机断开 → 触发急停，另一部手机的操控被强制中断
+
+**固件修复方案**（已在 `TB6612motor_ESP32S3_WiFi.ino` 中实现三层防护）：
+
+#### 第一层：WiFi AP 物理限制
+
+```cpp
+// WiFi 层限制最多 1 台设备接入（max_connection = 1）
+WiFi.softAP(AP_SSID, AP_PASSWORD, 1, false, 1);
+```
+
+第二台设备的 WiFi 连接请求在物理层被直接拒绝，不会进入 WebSocket 层。
+
+#### 第二层：WebSocket 层控制权仲裁
+
+```cpp
+static int8_t activeClientNum = -1;  // -1 = 无人连接
+```
+
+- 第一个连接的客户端获得控制权（`activeClientNum` 记录其编号），收到正常握手确认
+- 已有客户端占用时，后续连接立即收到拒绝消息并被断开：
+
+```json
+{"status":"rejected","reason":"Robot already in use"}
+```
+
+- 持有控制权的客户端断开后，`activeClientNum` 重置为 `-1`，下一台手机可重新接管
+
+#### 第三层：指令过滤
+
+```cpp
+// 非授权客户端的 TEXT 指令直接忽略
+if (clientNum != (uint8_t)activeClientNum) break;
+```
+
+即使有客户端绕过前两层，其指令也不会被执行。
+
+#### 保护机制汇总
+
+| 防护层 | 位置 | 效果 |
+|---|---|---|
+| WiFi AP `max_connection=1` | 物理/驱动层 | 第二台设备连不上 AP |
+| `activeClientNum` 仲裁 | WebSocket `onConnected` | 第二个 WS 连接立即被拒绝并断开 |
+| TEXT 指令过滤 | WebSocket `onText` | 非授权客户端的指令被忽略 |
+| 仅向控制端推送 IR 计数 | `broadcastIRCount` | IR 数据不泄露给其他设备 |
+| 断开时仅持控端触发急停 | WebSocket `onDisconnected` | 无关连接断开不影响电机 |
+
+---
+
+### 12.3 竞赛部署操作步骤
+
+**每台机器人（ESP32）固件配置：**
+
+```cpp
+// TB6612motor_ESP32S3_WiFi.ino 顶部修改
+static const char* AP_SSID     = "Robot-ESP32-XXXXXX";  // 每台改为唯一后缀
+static const char* AP_PASSWORD = "12345678";
+```
+
+建议命名规则：`Robot-ESP32-队伍编号`，例如：
+
+| 队伍 | SSID | 密码 |
+|---|---|---|
+| 1 队 | `Robot-ESP32-Team01` | `12345678` |
+| 2 队 | `Robot-ESP32-Team02` | `12345678` |
+| 3 队 | `Robot-ESP32-Team03` | `12345678` |
+
+**对应 Android App（编译时指定 SSID）：**
+
+在 `RobotWebSocketClient.kt` 的 `connect()` 调用中为每队传入对应 SSID：
+
+```kotlin
+client.connect(
+    context  = context,
+    ssid     = "Robot-ESP32-Team01",   // 与固件 AP_SSID 完全一致
+    password = "12345678",
+    wsUrl    = "ws://192.168.4.1:81"   // 所有队伍均相同，无需修改
+)
+```
+
+或通过 `build.gradle` 的 `buildConfigField` 在编译期注入 SSID，为每队打包专属 APK：
+
+```kotlin
+// app/build.gradle.kts
+android {
+    buildTypes {
+        // 通用 Debug 包
+        debug {
+            buildConfigField("String", "ROBOT_SSID", "\"Robot-ESP32-XXXXXX\"")
+        }
+    }
+    // 为每队定义 productFlavor
+    flavorDimensions += "team"
+    productFlavors {
+        create("team01") {
+            buildConfigField("String", "ROBOT_SSID", "\"Robot-ESP32-Team01\"")
+        }
+        create("team02") {
+            buildConfigField("String", "ROBOT_SSID", "\"Robot-ESP32-Team02\"")
+        }
+    }
+}
+```
+
+---
+
+### 12.4 被拒绝时的 App 提示
+
+若 ESP32 已被其他设备占用，App 连接时会收到 `{"status":"rejected"}` 消息，状态栏显示红色错误：
+
+```
+❌  机器人已被其他设备占用，请稍后重试
+```
+
+此时的处理建议：
+
+1. **等待**：持控设备断开后，错误自动消失，重新点击「连接」即可接管
+2. **重启 ESP32**：断电重启后 `activeClientNum` 重置为 `-1`，任意设备可重新连接
+3. **检查 SSID**：确认本机 App 配置的 SSID 与目标机器人固件的 `AP_SSID` 完全一致，排除误连到其他机器人的情况
