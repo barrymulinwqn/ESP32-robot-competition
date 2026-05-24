@@ -14,6 +14,7 @@
 - [十、左摇杆控制逻辑](#十左摇杆控制逻辑)
 - [十一、电机控制真值表](#十一电机控制真值表)
 - [十二、注意事项](#十二注意事项)
+- [十三、固件烧录说明（Arduino IDE）](#十三固件烧录说明arduino-ide)
 
 ---
 
@@ -415,3 +416,76 @@ YFRobot 2015 解码器                    ESP32-S3 N8R2
 | 8 | **蓝牙配对** | YFRobot 2015 解码器与手柄需先完成蓝牙配对；解码器上电后按手柄 PS 键进行配对 |
 | 9 | **死区调整** | 代码中的死区阈值（96/160）可根据实际摇杆漂移量调整，建议先串口打印 LX/LY 原始值确认中心偏差 |
 | 10 | **电池容量** | 两个 12V 电机在 7.4V 下启动电流可达 2~4A，确认 18650 电池持续放电倍率 ≥ 2C |
+
+---
+
+## 十三、固件烧录说明（Arduino IDE）
+
+### 13.1 开发环境要求
+
+| 软件 | 版本要求 | 说明 |
+|------|:--------:|------|
+| **Arduino IDE** | ≥ 2.3 | 推荐使用 IDE 2.x，内置库管理器和串口监视器 |
+| **Arduino-ESP32 BSP** | **≥ 3.0**（本固件使用 v3.x API） | 通过 Arduino IDE 的「开发板管理器」安装 |
+| **CP210x / CH340 驱动** | 视开发板 USB 芯片而定 | macOS 12+ 需手动安装 CH340 驱动 |
+
+> ⚠️ 本固件（`esp32_robot_controller.ino`）使用 **Arduino-ESP32 v3.x** API（`ledcAttach` / `ledcWrite(pin, val)`）。  
+> 若使用 v2.x BSP 编译将报错，请在「开发板管理器」确认版本 ≥ 3.0。
+
+### 13.2 安装 Arduino-ESP32 BSP（v3.x）
+
+1. 打开 Arduino IDE → **文件 → 首选项**
+2. 在「附加开发板管理器网址」中添加：
+   ```
+   https://espressif.github.io/arduino-esp32/package_esp32_index.json
+   ```
+3. 打开 **工具 → 开发板 → 开发板管理器**，搜索 `esp32`
+4. 选择 **esp32 by Espressif Systems**，安装 **3.x.x 最新版本**
+
+### 13.3 Arduino IDE 烧录参数配置
+
+打开 `esp32_robot_controller.ino` 后，按下表配置 **工具** 菜单各项：
+
+| 工具菜单项 | 推荐设置 | 说明 |
+|-----------|:--------:|------|
+| **开发板** | `ESP32S3 Dev Module` | 在 esp32 → ESP32S3 Dev Module |
+| **USB CDC On Boot** | `Disabled` | 避免占用 USB 串口影响调试（不使用 USB CDC 输出） |
+| **CPU Frequency** | `240MHz (WiFi)` | 最高性能，PS2 软件 SPI 时序更稳定 |
+| **Flash Mode** | `QIO 80MHz` | N8R2 8MB Flash 标准模式 |
+| **Flash Size** | `8MB (64Mb)` | 对应 N8R2 的 8MB Flash |
+| **Partition Scheme** | `8M with spiffs (3MB APP/1.5MB SPIFFS)` | 保证 APP 分区足够大 |
+| **PSRAM** | `OPI PSRAM` | N8R2 内置 2MB OPI PSRAM（R2） |
+| **Upload Speed** | `921600` | 高速烧录，若失败降为 `460800` |
+| **端口** | 对应 USB 串口 | macOS 通常为 `/dev/tty.usbserial-xxxx` 或 `/dev/tty.SLAB_USBtoUART` |
+
+### 13.4 烧录步骤
+
+```
+① 用 USB-C 数据线连接 ESP32-S3 N8R2 与电脑
+         （确认线材支持数据传输，仅充电线无法识别串口）
+② Arduino IDE 选择上述开发板和端口参数
+③ 点击「上传（→）」按钮，等待编译完成
+④ 若烧录卡在「Connecting...」：
+     · 按住 ESP32-S3 板上的 BOOT 按钮
+     · 同时短按 RST 按钮后松开
+     · 再松开 BOOT 按钮  → 进入下载模式
+⑤ 烧录完成后，串口监视器（115200 baud）应显示：
+     ========================================
+      ESP32-S3 Robot Controller  v1.0
+      YFRobot 2015 + TB6612 D153C
+     ========================================
+     [TB6612] STBY=HIGH, PWM 20kHz 8-bit  OK
+     [PS2]   Waiting for YFRobot 2015 decoder......  OK
+     [PS2]   Analog mode confirmed (ID=0x73)
+     [Ready] Left joystick → motor control
+```
+
+### 13.5 常见烧录问题排查
+
+| 现象 | 原因 | 解决方法 |
+|------|------|----------|
+| 端口不显示 | 未安装 USB 转串口驱动 | macOS：安装 CH340 驱动（WCH 官网）或 CP210x 驱动（Silicon Labs） |
+| `Connecting...` 超时 | 未进入下载模式 | 按步骤④手动触发 BOOT+RST |
+| `ledcAttach was not declared` | BSP 版本为 v2.x | 在开发板管理器升级 esp32 BSP 到 ≥ 3.0 |
+| 编译通过但电机不动 | STBY 未拉高 / 接线错误 | 用万用表确认 GPIO 10 高电平；检查 AIN1/AIN2/BIN1/BIN2 接线 |
+| PS2 一直 `TIMEOUT` | DAT 无上拉 / VCC 接了 5V | 确认 DAT↔VCC 之间有 10kΩ；确认 YFRobot 2015 接 3.3V |

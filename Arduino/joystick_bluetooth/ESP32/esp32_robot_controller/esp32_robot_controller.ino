@@ -1,7 +1,7 @@
 /**
  * @file    esp32_robot_controller.ino
  * @brief   YFRobot 2015 手柄解码器 + TB6612 D153C 双电机控制
- * @board   ESP32-S3 N8R2（Arduino-ESP32 v2.x 或 v3.x）
+ * @board   ESP32-S3 N8R2（Arduino-ESP32 v3.x）
  *
  * ─── 硬件接线（参考 ../esp32_decoder.md）────────────────────────
  *
@@ -68,19 +68,11 @@ static constexpr uint8_t PIN_PS2_CMD = 17;  // 命令输出（MOSI，空闲高�
 static constexpr uint8_t PIN_PS2_DAT = 18;  // 数据输入（MISO，需 10kΩ 上拉至 VCC）
 
 // ============================================================
-//  LEDC PWM 配置（Arduino-ESP32 v2.x API）
-//
-//  若使用 Arduino-ESP32 v3.x，须将 setup() 中的初始化改为：
-//    ledcAttach(PIN_PWMA, LEDC_FREQ, LEDC_RES);
-//    ledcAttach(PIN_PWMB, LEDC_FREQ, LEDC_RES);
-//  并将 motorA/motorB 中的 ledcWrite(channel, val) 改为：
-//    ledcWrite(PIN_PWMA, val);
-//    ledcWrite(PIN_PWMB, val);
+//  LEDC PWM 配置（Arduino-ESP32 v3.x API）
+//  v3.x 直接以引脚号绑定通道，无需手动分配 channel 编号
 // ============================================================
-static constexpr uint8_t  LEDC_CHAN_A = 0;      // 左电机 LEDC 通道
-static constexpr uint8_t  LEDC_CHAN_B = 1;      // 右电机 LEDC 通道
-static constexpr uint32_t LEDC_FREQ   = 20000;  // 20 kHz，超声波频率，消除电机啸叫
-static constexpr uint8_t  LEDC_RES   = 8;       // 8-bit（占空比 0~255）
+static constexpr uint32_t LEDC_FREQ = 20000;  // 20 kHz，超声波频率，消除电机啸叫
+static constexpr uint8_t  LEDC_RES  = 8;      // 8-bit（占空比 0~255）
 
 // ============================================================
 //  摇杆死区阈值（PS2 坐标 0~255，中心 = 128）
@@ -180,13 +172,13 @@ static bool ps2_poll() {
 static inline void motorA(uint8_t ain1, uint8_t ain2, uint8_t pwm) {
     digitalWrite(PIN_AIN1, ain1);
     digitalWrite(PIN_AIN2, ain2);
-    ledcWrite(LEDC_CHAN_A, pwm);
+    ledcWrite(PIN_PWMA, pwm);  // v3.x：以引脚号写入占空比
 }
 
 static inline void motorB(uint8_t bin1, uint8_t bin2, uint8_t pwm) {
     digitalWrite(PIN_BIN1, bin1);
     digitalWrite(PIN_BIN2, bin2);
-    ledcWrite(LEDC_CHAN_B, pwm);
+    ledcWrite(PIN_PWMB, pwm);  // v3.x：以引脚号写入占空比
 }
 
 // ── 运动控制函数（对应 esp32_decoder.md 第十一节真值表）──────────
@@ -273,11 +265,9 @@ void setup() {
     brakeStop();
     digitalWrite(PIN_STBY, HIGH);
 
-    // 配置 LEDC PWM（Arduino-ESP32 v2.x API）
-    ledcSetup(LEDC_CHAN_A, LEDC_FREQ, LEDC_RES);
-    ledcAttachPin(PIN_PWMA, LEDC_CHAN_A);
-    ledcSetup(LEDC_CHAN_B, LEDC_FREQ, LEDC_RES);
-    ledcAttachPin(PIN_PWMB, LEDC_CHAN_B);
+    // 配置 LEDC PWM（Arduino-ESP32 v3.x：ledcAttach 一步绑定引脚+频率+分辨率）
+    ledcAttach(PIN_PWMA, LEDC_FREQ, LEDC_RES);
+    ledcAttach(PIN_PWMB, LEDC_FREQ, LEDC_RES);
     Serial.printf("[TB6612] STBY=HIGH, PWM %.0fkHz 8-bit  OK\n", LEDC_FREQ / 1000.0f);
 
     // ── YFRobot 2015 PS2 解码器初始化 ──────────────────────
