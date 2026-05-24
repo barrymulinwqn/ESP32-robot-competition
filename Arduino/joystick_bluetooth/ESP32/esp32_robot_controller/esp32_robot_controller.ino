@@ -1,6 +1,7 @@
 /**
  * @file    esp32_robot_controller.ino
  * @brief   YFRobot 2015 手柄解码器 + TB6612 D153C 双电机控制
+ *          + 激光发射（38 kHz TTL）+ VS1838B 激光接收 + WS2812B LED
  * @board   ESP32-S3 N8R2（Arduino-ESP32 v3.x）
  *
  * ─── 硬件接线（参考 ../esp32_decoder.md）────────────────────────
@@ -8,19 +9,28 @@
  *  YFRobot 2015 解码器 → ESP32-S3：
  *    VCC → D153C 3.3V 输出（⚠️ 必须 3.3V，勿接 5V）
  *    GND → 公共 GND
- *    CS  → GPIO 15
- *    CLK → GPIO 16
- *    CMD → GPIO 17
- *    DAT → GPIO 18（DAT ↔ VCC 之间接 10kΩ 上拉电阻）
+ *    CS  → GPIO 15   CLK → GPIO 16
+ *    CMD → GPIO 17   DAT → GPIO 18（DAT ↔ VCC 接 10kΩ 上拉）
  *
  *  ESP32-S3 → TB6612 D153C：
  *    GPIO  4 → PWMA   GPIO  5 → AIN1   GPIO  6 → AIN2
  *    GPIO  7 → PWMB   GPIO  8 → BIN1   GPIO  9 → BIN2
  *    GPIO 10 → STBY
  *
- *  TB6612 D153C → 电机：
- *    AO1/AO2 → 左电机（33GB-520-18.7F DC 12V）
- *    BO1/BO2 → 右电机（33GB-520-18.7F DC 12V）
+ *  激光发射器（18×45 980nm 30mW，100kHz TTL）：
+ *    VCC → D153C 5V 输出
+ *    GND → 公共 GND
+ *    TTL → GPIO 11（38 kHz LEDC PWM，50% 占空比）
+ *
+ *  VS1838B 激光接收器：
+ *    VCC → D153C 3.3V 输出
+ *    GND → 公共 GND
+ *    OUT → GPIO 12（Active LOW，INPUT_PULLUP）
+ *
+ *  WS2812B LED 灯条：
+ *    5V  → D153C 5V 输出
+ *    GND → 公共 GND
+ *    DIN → GPIO 13
  *
  *  D153C 供电：
  *    Vin+  ← 18650 电池组正极（~7.4V，经 ON/OFF 开关）
@@ -29,24 +39,24 @@
  *
  * ─── 控制逻辑────────────────────────────────────────────────────
  *
- *  所有控制通过【左摇杆】实现（LX / LY，范围 0~255，中心 = 128）
+ *  左摇杆（LX/LY，0~255，中心=128，死区 96~160）：运动控制
+ *    LY<96  前进  LY>160  后退  LX<96  左  LX>160  右（组合见下）
  *
- *    LY < 96            → 前进方向
- *    LY > 160           → 后退方向
- *    LX < 96            → 左方向
- *    LX > 160           → 右方向
- *    LX 和 LY 均在死区   → 滑行停止
+ *  L2 短按（按下 < 500ms 后松开）：发射一次激光（200ms 脉冲）
+ *  L2 长按（持续 ≥ 500ms）：每 300ms 自动循环发射激光
+ *  R2 按下：WS2812B 全部恢复绿色（重置命中计数）
  *
- *  组合映射（见 esp32_decoder.md 第十节）：
- *    前 + 中   → 前进       后 + 中   → 后退
- *    左 + 中   → 原地左转   右 + 中   → 原地右转
- *    前 + 左   → 左前弧线   前 + 右   → 右前弧线
- *    后 + 左   → 左后弧线   后 + 右   → 右后弧线
+ * ─── VS1838B 命中逻辑──────────────────────────────────────────
+ *  接收到 38 kHz 激光 → OUT 变低 → 下一个 LED 变红（从左到右）
+ *  上电初始：全部绿色；R2 按下：全部恢复绿色
  *
  * ─── 依赖────────────────────────────────────────────────────────
- *  无外部库，PS2 协议完全自实现（软件 SPI，无需 PS2X_lib）
+ *  FastLED >= 3.6.0（工具 → 管理库 → 搜索 FastLED 安装）
+ *  PS2 协议完全自实现（软件 SPI，无需 PS2X_lib）
  * ────────────────────────────────────────────────────────────────
  */
+
+#include <FastLED.h>
 
 // ============================================================
 //  引脚定义
@@ -67,20 +77,36 @@ static constexpr uint8_t PIN_PS2_CLK = 16;  // 时钟（空闲高）
 static constexpr uint8_t PIN_PS2_CMD = 17;  // 命令输出（MOSI，空闲高）
 static constexpr uint8_t PIN_PS2_DAT = 18;  // 数据输入（MISO，需 10kΩ 上拉至 VCC）
 
+// 激光发射器（TTL 调制，38 kHz，接 D153C 5V）
+static constexpr uint8_t PIN_LASER_TX = 11;
+// VS1838B 激光接收器（OUT，Active LOW，接 D153C 3.3V）
+static constexpr uint8_t PIN_LASER_RX = 12;
+// WS2812B LED 灯条数据线（接 D153C 5V 供电）
+static constexpr uint8_t PIN_LED_DATA = 13;
+
 // ============================================================
 //  LEDC PWM 配置（Arduino-ESP32 v3.x API）
 //  v3.x 直接以引脚号绑定通道，无需手动分配 channel 编号
 // ============================================================
-static constexpr uint32_t LEDC_FREQ = 20000;  // 20 kHz，超声波频率，消除电机啸叫
-static constexpr uint8_t  LEDC_RES  = 8;      // 8-bit（占空比 0~255）
+static constexpr uint32_t LEDC_FREQ      = 20000;  // 电机 PWM 20 kHz（超声波，消除啸叫）
+static constexpr uint8_t  LEDC_RES       = 8;      // 8-bit 分辨率（0~255）
+static constexpr uint32_t LASER_FREQ     = 38000;  // 激光载波 38 kHz（匹配 VS1838B）
+static constexpr uint8_t  LASER_RES      = 8;
+static constexpr uint8_t  LASER_DUTY_ON  = 128;    // 50% 占空比（激光开启时）
+
+// ============================================================
+//  WS2812B LED 配置
+// ============================================================
+static constexpr uint8_t NUM_LEDS       = 8;   // 灯条 LED 总数（按实物修改）
+static constexpr uint8_t LED_BRIGHTNESS = 60;  // 亮度（0~255，60≈23%，护眼）
 
 // ============================================================
 //  摇杆死区阈值（PS2 坐标 0~255，中心 = 128）
 // ============================================================
-static constexpr uint8_t JOY_FWD_THR  = 96;   // LY < 96  → 前进方向
-static constexpr uint8_t JOY_BWD_THR  = 160;  // LY > 160 → 后退方向
-static constexpr uint8_t JOY_LEFT_THR = 96;   // LX < 96  → 左方向
-static constexpr uint8_t JOY_RIGHT_THR = 160; // LX > 160 → 右方向
+static constexpr uint8_t JOY_FWD_THR   = 96;   // LY < 96  → 前进方向
+static constexpr uint8_t JOY_BWD_THR   = 160;  // LY > 160 → 后退方向
+static constexpr uint8_t JOY_LEFT_THR  = 96;   // LX < 96  → 左方向
+static constexpr uint8_t JOY_RIGHT_THR = 160;  // LX > 160 → 右方向
 
 // ============================================================
 //  PS2 协议时序（软件 SPI，LSB-first）
@@ -103,11 +129,44 @@ static constexpr uint8_t PS2_ID_ANALOG  = 0x73;  // 模拟手柄模式（摇杆�
 static constexpr uint8_t PS2_ID_DIGITAL = 0x41;  // 数字模式（摇杆数据无意义）
 static constexpr uint8_t PS2_ACK_BYTE   = 0x5A;
 
+// PS2 BTN2 按键掩码（Active LOW：0 = 按下）
+// BTN2 字节：[□][×][○][△][R1][L1][R2][L2]
+//             bit7 bit6 bit5 bit4 bit3 bit2 bit1 bit0
+static constexpr uint8_t BTN_L2 = 0x01;  // L2：BTN2 bit0
+static constexpr uint8_t BTN_R2 = 0x02;  // R2：BTN2 bit1
+
 // ============================================================
 //  全局状态
 // ============================================================
 static uint8_t ps2_buf[PS2_FRAME_LEN];  // PS2 收发缓冲区
 static bool    ps2_connected = false;   // 解码器连接状态
+
+// WS2812B LED 数组（FastLED 管理）
+static CRGB   leds[NUM_LEDS];
+static int8_t hit_count = 0;  // 已命中（变红）的 LED 数量，0 ~ NUM_LEDS
+
+// 激光状态机
+enum LaserState : uint8_t {
+    LASER_IDLE,      // 空闲
+    LASER_FIRING,    // 正在发射（38 kHz 输出中）
+    LASER_COOLDOWN,  // 连发冷却期（等待下次发射）
+};
+static LaserState laser_state      = LASER_IDLE;
+static uint32_t   laser_timer_ms   = 0;     // 当前状态进入时刻
+static bool       l2_prev          = false; // 上一帧 L2 是否按下
+static uint32_t   l2_press_time_ms = 0;     // L2 本次按下的起始时刻
+static bool       laser_auto       = false; // true = 正处于长按连发模式
+
+static constexpr uint32_t LASER_SHOT_MS     = 200;  // 单次发射持续时间（ms）
+static constexpr uint32_t LASER_PERIOD_MS   = 300;  // 连发总周期（ms）
+static constexpr uint32_t LASER_COOLDOWN_MS = LASER_PERIOD_MS - LASER_SHOT_MS;  // 100 ms
+static constexpr uint32_t LASER_LONG_MS     = 500;  // 长按判定阈值（ms）
+
+// VS1838B 命中检测
+static bool     rx_prev_high   = true;  // 上一帧 GPIO12 是否为高（HIGH = 未接收）
+static uint32_t rx_cooldown_ms = 0;     // 命中冷却结束时刻，防重复计数
+
+static constexpr uint32_t HIT_COOLDOWN_MS = 600;  // 同一命中最短间隔（ms）
 
 // ============================================================
 //  PS2 底层：单字节收发（CLK 空闲高，LSB-first）
@@ -244,14 +303,141 @@ static void coastStop() {
 }
 
 // ============================================================
+//  激光控制（LEDC 38 kHz）
+// ============================================================
+
+// 开启激光：输出 38 kHz 50% 占空比 PWM
+static inline void laserOn() {
+    ledcWrite(PIN_LASER_TX, LASER_DUTY_ON);
+}
+
+// 关闭激光：占空比 = 0
+static inline void laserOff() {
+    ledcWrite(PIN_LASER_TX, 0);
+}
+
+/**
+ * updateLaser() — 每帧调用，处理 L2 短按 / 长按 / 连发逻辑
+ *
+ * 短按（按下 < 500ms 后松开）：发射一次（200ms）
+ * 长按（持续 >= 500ms）：每 300ms 循环发射（200ms 开 + 100ms 冷却）
+ *
+ * @param l2_down  当前帧 L2 是否按下（Active LOW 已转换：true = 按下）
+ */
+static void updateLaser(bool l2_down) {
+    const uint32_t now = millis();
+
+    // 记录 L2 下降沿时刻
+    if (l2_down && !l2_prev) {
+        l2_press_time_ms = now;
+    }
+
+    switch (laser_state) {
+
+        case LASER_IDLE:
+            if (l2_down) {
+                // 长按判定：持续按下超过阈值则进入连发模式
+                if ((now - l2_press_time_ms) >= LASER_LONG_MS) {
+                    laser_auto    = true;
+                    laser_state   = LASER_FIRING;
+                    laser_timer_ms = now;
+                    laserOn();
+                }
+            } else if (!l2_down && l2_prev) {
+                // 上升沿：短按松开（未触发连发）
+                if (!laser_auto) {
+                    laser_state   = LASER_FIRING;
+                    laser_timer_ms = now;
+                    laserOn();
+                }
+                laser_auto = false;  // 起圈复位标志
+            }
+            break;
+
+        case LASER_FIRING:
+            if ((now - laser_timer_ms) >= LASER_SHOT_MS) {
+                laserOff();
+                if (laser_auto && l2_down) {
+                    // 进入冷却期等待下次循环
+                    laser_state   = LASER_COOLDOWN;
+                    laser_timer_ms = now;
+                } else {
+                    // 单次发射完成，或长按已松开
+                    laser_auto  = false;
+                    laser_state = LASER_IDLE;
+                }
+            }
+            break;
+
+        case LASER_COOLDOWN:
+            if (!l2_down) {
+                // 冒冷却期松开—中止连发
+                laser_auto  = false;
+                laser_state = LASER_IDLE;
+            } else if ((now - laser_timer_ms) >= LASER_COOLDOWN_MS) {
+                // 冷却完成，再次发射
+                laser_state   = LASER_FIRING;
+                laser_timer_ms = now;
+                laserOn();
+            }
+            break;
+    }
+
+    l2_prev = l2_down;
+}
+
+// ============================================================
+//  WS2812B LED 控制
+// ============================================================
+
+// 初始化：全部设为绿色
+static void ledsInit() {
+    hit_count = 0;
+    fill_solid(leds, NUM_LEDS, CRGB::Green);
+    FastLED.show();
+}
+
+// 记录一次命中：下一个 LED 变红
+static void ledsAddHit() {
+    if (hit_count < (int8_t)NUM_LEDS) {
+        leds[hit_count] = CRGB::Red;
+        FastLED.show();
+        hit_count++;
+        Serial.printf("[LED]   Hit! %d/%d LEDs red\n", hit_count, (int)NUM_LEDS);
+    }
+}
+
+// ============================================================
+//  VS1838B 命中检测（每帧调用）
+// ============================================================
+
+/**
+ * updateHitDetect() — 检测 GPIO12 下降沿（HIGH→LOW）
+ * VS1838B 接收到 38 kHz 激光时 OUT 输出低电平
+ * 应用 600ms 冷却防止同一数据包重复计数
+ */
+static void updateHitDetect() {
+    const uint32_t now      = millis();
+    const bool     rx_high  = (digitalRead(PIN_LASER_RX) == HIGH);
+
+    // 下降沿（HIGH→LOW）且冷却已过
+    if (rx_prev_high && !rx_high && (now >= rx_cooldown_ms)) {
+        rx_cooldown_ms = now + HIT_COOLDOWN_MS;
+        ledsAddHit();
+    }
+    rx_prev_high = rx_high;
+}
+
+// ============================================================
 //  setup()
 // ============================================================
 void setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 2000) {}  // 等待串口，最多 2s
     Serial.println("\n========================================");
-    Serial.println(" ESP32-S3 Robot Controller  v1.0");
+    Serial.println(" ESP32-S3 Robot Controller  v2.0");
     Serial.println(" YFRobot 2015 + TB6612 D153C");
+    Serial.println(" Laser TX/RX + WS2812B LED");
     Serial.println("========================================");
 
     // ── TB6612 D153C 初始化 ────────────────────────────────
@@ -265,16 +451,32 @@ void setup() {
     brakeStop();
     digitalWrite(PIN_STBY, HIGH);
 
-    // 配置 LEDC PWM（Arduino-ESP32 v3.x：ledcAttach 一步绑定引脚+频率+分辨率）
+    // 配置电机 LEDC PWM（Arduino-ESP32 v3.x）
     ledcAttach(PIN_PWMA, LEDC_FREQ, LEDC_RES);
     ledcAttach(PIN_PWMB, LEDC_FREQ, LEDC_RES);
     Serial.printf("[TB6612] STBY=HIGH, PWM %.0fkHz 8-bit  OK\n", LEDC_FREQ / 1000.0f);
 
-    // ── YFRobot 2015 PS2 解码器初始化 ──────────────────────
+    // ── 激光发射器初始化 ──────────────────────
+    ledcAttach(PIN_LASER_TX, LASER_FREQ, LASER_RES);
+    ledcWrite(PIN_LASER_TX, 0);  // 上电默认关闭
+    Serial.printf("[Laser]  TX=GPIO%d, %.0fkHz 8-bit  OK\n", PIN_LASER_TX, LASER_FREQ / 1000.0f);
+
+    // ── VS1838B 激光接收器初始化 ────────────────
+    pinMode(PIN_LASER_RX, INPUT_PULLUP);
+    Serial.printf("[LaserRX] RX=GPIO%d, INPUT_PULLUP  OK\n", PIN_LASER_RX);
+
+    // ── WS2812B LED 灯条初始化 ───────────────────
+    FastLED.addLeds<WS2812B, PIN_LED_DATA, GRB>(leds, NUM_LEDS);
+    FastLED.setBrightness(LED_BRIGHTNESS);
+    ledsInit();
+    Serial.printf("[LED]    WS2812B x%d, GPIO%d, brightness=%d  OK\n",
+                  NUM_LEDS, PIN_LED_DATA, LED_BRIGHTNESS);
+
+    // ── YFRobot 2015 PS2 解码器初始化 ──────────────
     pinMode(PIN_PS2_CS,  OUTPUT);
     pinMode(PIN_PS2_CLK, OUTPUT);
     pinMode(PIN_PS2_CMD, OUTPUT);
-    pinMode(PIN_PS2_DAT, INPUT_PULLUP);  // 上拉（板外 10kΩ 上拉为主，内部上拉做兜底）
+    pinMode(PIN_PS2_DAT, INPUT_PULLUP);  // 外部 10kΩ 上拉为主，内部上拉做兼底
 
     digitalWrite(PIN_PS2_CS,  HIGH);   // CS 空闲高
     digitalWrite(PIN_PS2_CLK, HIGH);   // CLK 空闲高
@@ -306,7 +508,9 @@ void setup() {
     Serial.println("[Ready] Left joystick → motor control");
     Serial.println("  LY<96  = forward   LY>160 = backward");
     Serial.println("  LX<96  = left      LX>160 = right");
-    Serial.println("  deadzone [96,160] = coast stop");
+    Serial.println("  L2 short press = laser shot (200ms)");
+    Serial.println("  L2 long press  = auto laser (300ms cycle)");
+    Serial.println("  R2 press       = reset LEDs to green");
     Serial.println("========================================\n");
 }
 
@@ -319,10 +523,14 @@ void loop() {
     // ── 连接状态变化通知 ──────────────────────────────────
     if (!valid) {
         if (ps2_connected) {
-            Serial.println("[PS2] ⚠ Connection lost — motors stopped");
+            Serial.println("[PS2] ⚠ Connection lost — motors/laser stopped");
             ps2_connected = false;
         }
-        brakeStop();  // 失联时制动停止，保证安全
+        brakeStop();   // 失联时制动停止
+        laserOff();    // 失联时关闭激光
+        laser_state = LASER_IDLE;
+        laser_auto  = false;
+        l2_prev     = false;
         delay(200);
         return;
     }
@@ -331,22 +539,43 @@ void loop() {
         ps2_connected = true;
     }
 
-    // ── 读取左摇杆 ────────────────────────────────────────
-    const uint8_t lx = ps2_buf[PS2_IDX_LX];  // 0=最左  128=中心  255=最右
-    const uint8_t ly = ps2_buf[PS2_IDX_LY];  // 0=最前  128=中心  255=最后
+    // ── 读取摇杆与按键 ────────────────────────────────────
+    const uint8_t lx   = ps2_buf[PS2_IDX_LX];   // 0=最左  128=中心  255=最右
+    const uint8_t ly   = ps2_buf[PS2_IDX_LY];   // 0=最前  128=中心  255=最后
+    const uint8_t btn2 = ps2_buf[PS2_IDX_BTN2]; // Active LOW：0=按下
 
-    const bool fwd     = (ly < JOY_FWD_THR);           // LY < 96
-    const bool bwd     = (ly > JOY_BWD_THR);            // LY > 160
-    const bool lft     = (lx < JOY_LEFT_THR);           // LX < 96
-    const bool rgt     = (lx > JOY_RIGHT_THR);          // LX > 160
-    const bool ly_mid  = (!fwd && !bwd);
-    const bool lx_mid  = (!lft && !rgt);
+    // L2 / R2（Active LOW：bit 为 0 表示按下）
+    const bool l2_down = !(btn2 & BTN_L2);
+    const bool r2_down = !(btn2 & BTN_R2);
+
+    // ── R2：边沿检测，按下时重置 LED ──────────────────────
+    static bool r2_prev = false;
+    if (r2_down && !r2_prev) {
+        ledsInit();
+        Serial.println("[LED]   R2 pressed — LEDs reset to green");
+    }
+    r2_prev = r2_down;
+
+    // ── 激光状态机更新 ────────────────────────────────────
+    updateLaser(l2_down);
+
+    // ── VS1838B 命中检测 ──────────────────────────────────
+    updateHitDetect();
+
+    // ── 左摇杆运动判定 ────────────────────────────────────
+    const bool fwd    = (ly < JOY_FWD_THR);   // LY < 96
+    const bool bwd    = (ly > JOY_BWD_THR);   // LY > 160
+    const bool lft    = (lx < JOY_LEFT_THR);  // LX < 96
+    const bool rgt    = (lx > JOY_RIGHT_THR); // LX > 160
+    const bool ly_mid = (!fwd && !bwd);
+    const bool lx_mid = (!lft && !rgt);
 
     // ── 调试输出（每 25 帧打印一次，约 500ms 间隔）────────
     static uint8_t dbg_cnt = 0;
     if (++dbg_cnt >= 25) {
         dbg_cnt = 0;
-        Serial.printf("[Joy] LX=%3u  LY=%3u\n", lx, ly);
+        Serial.printf("[Joy] LX=%3u  LY=%3u  BTN2=0x%02X  Laser=%d\n",
+                      lx, ly, btn2, (int)laser_state);
     }
 
     // ── 动作判定（优先级从上到下）─────────────────────────
