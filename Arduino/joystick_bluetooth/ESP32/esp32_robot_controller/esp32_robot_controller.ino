@@ -57,6 +57,16 @@
  */
 
 #include <FastLED.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+
+// ============================================================
+//  WiFi 配置（修改为实际 SSID / 密码）
+// ============================================================
+static constexpr char WIFI_SSID[]    = "your_ssid";      // ← 修改
+static constexpr char WIFI_PASS[]    = "your_password";  // ← 修改
+static constexpr char HIT_API_URL[]  = "https://mock.test.com/hit";
 
 // ============================================================
 //  引脚定义
@@ -134,6 +144,48 @@ static constexpr uint8_t PS2_ACK_BYTE   = 0x5A;
 //             bit7 bit6 bit5 bit4 bit3 bit2 bit1 bit0
 static constexpr uint8_t BTN_L2 = 0x01;  // L2：BTN2 bit0
 static constexpr uint8_t BTN_R2 = 0x02;  // R2：BTN2 bit1
+
+// ============================================================
+//  HTTP 任务（FreeRTOS）
+// ============================================================
+static constexpr uint8_t HTTP_QUEUE_LEN = 4;   // 最多缓冲 4 次待发请求
+static QueueHandle_t     http_queue      = nullptr;
+
+/**
+ * httpTask — 运行于 Core 0，阻塞等待队列信号
+ * 每次收到信号即向 HIT_API_URL 发送 HTTP POST
+ * 与主循环完全解耦，不阻塞电机 / 激光控制
+ */
+static void httpTask(void* /*arg*/) {
+    uint8_t sig;
+    for (;;) {
+        // 阻塞等待 laserOn() 投递的信号
+        if (xQueueReceive(http_queue, &sig, portMAX_DELAY) != pdTRUE) continue;
+
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[HTTP]  WiFi 未连接，跳过 POST");
+            continue;
+        }
+
+        WiFiClientSecure client;
+        // ⚠️ 仅测试环境跳过证书校验；生产环境请改用 client.setCACert()
+        client.setInsecure();
+
+        HTTPClient http;
+        if (http.begin(client, HIT_API_URL)) {
+            http.addHeader("Content-Type", "application/json");
+            int code = http.POST("{\"event\":\"laser_fired\"}");
+            if (code > 0) {
+                Serial.printf("[HTTP]  POST %s → HTTP %d\n", HIT_API_URL, code);
+            } else {
+                Serial.printf("[HTTP]  POST 失败: %s\n", HTTPClient::errorToString(code).c_str());
+            }
+            http.end();
+        } else {
+            Serial.println("[HTTP]  http.begin() 失败");
+        }
+    }
+}
 
 // ============================================================
 //  全局状态
@@ -306,9 +358,12 @@ static void coastStop() {
 //  激光控制（LEDC 38 kHz）
 // ============================================================
 
-// 开启激光：输出 38 kHz 50% 占空比 PWM
+// 开启激光：输出 38 kHz 50% 占空比 PWM，并通知 HTTP 任务上报命中
 static inline void laserOn() {
     ledcWrite(PIN_LASER_TX, LASER_DUTY_ON);
+    // 非阻塞投递：若队列已满则丢弃（不影响实时控制）
+    const uint8_t sig = 1;
+    xQueueSend(http_queue, &sig, 0);
 }
 
 // 关闭激光：占空比 = 0
@@ -439,6 +494,29 @@ void setup() {
     Serial.println(" YFRobot 2015 + TB6612 D153C");
     Serial.println(" Laser TX/RX + WS2812B LED");
     Serial.println("========================================");
+
+    // ── HTTP 队列 + 任务初始化 ──────────────────────────────
+    http_queue = xQueueCreate(HTTP_QUEUE_LEN, sizeof(uint8_t));
+    // Core 0：主循环在 Core 1，HTTP 不与电机控制竞争
+    xTaskCreatePinnedToCore(httpTask, "httpTask", 8192, nullptr, 1, nullptr, 0);
+    Serial.println("[HTTP]  Task started on Core 0");
+
+    // ── WiFi 连接 ──────────────────────────────────────────
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    Serial.printf("[WiFi]  Connecting to \"%s\"...", WIFI_SSID);
+    {
+        uint32_t t0 = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) {
+            Serial.print(".");
+            delay(300);
+        }
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("  OK  IP=%s\n", WiFi.localIP().toString().c_str());
+    } else {
+        Serial.println("  TIMEOUT  (HTTP 上报将被跳过)");
+    }
 
     // ── TB6612 D153C 初始化 ────────────────────────────────
     pinMode(PIN_AIN1, OUTPUT);
