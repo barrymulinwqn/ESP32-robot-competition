@@ -1,0 +1,57 @@
+import FreeCAD as App
+import Part
+from pathlib import Path
+
+OUTER_LENGTH = 100.0
+OUTER_WIDTH = 80.0
+OUTER_HEIGHT = 80.0
+WALL_THICKNESS = 2.0
+DOCUMENT_NAME = "HollowRectangularBox"
+OUTPUT_FILE = "hollow_rectangular_box_100x80x80mm_open_bottom.FCStd"
+
+
+if WALL_THICKNESS <= 0:
+    raise ValueError("WALL_THICKNESS must be positive")
+
+if OUTER_LENGTH <= 2 * WALL_THICKNESS or OUTER_WIDTH <= 2 * WALL_THICKNESS:
+    raise ValueError("Wall thickness is too large for the outer length/width")
+
+if OUTER_HEIGHT <= WALL_THICKNESS:
+    raise ValueError("Wall thickness is too large for the outer height")
+
+for doc in App.listDocuments().values():
+    if doc.Name == DOCUMENT_NAME:
+        App.closeDocument(doc.Name)
+        break
+
+doc = App.newDocument(DOCUMENT_NAME)
+
+outer_box = Part.makeBox(OUTER_LENGTH, OUTER_WIDTH, OUTER_HEIGHT, App.Vector(0, 0, 0))
+inner_box = Part.makeBox(
+    OUTER_LENGTH - 2 * WALL_THICKNESS,
+    OUTER_WIDTH - 2 * WALL_THICKNESS,
+    OUTER_HEIGHT - WALL_THICKNESS,
+    App.Vector(WALL_THICKNESS, WALL_THICKNESS, 0),
+)
+
+open_bottom_box = outer_box.cut(inner_box)
+feature = doc.addObject("Part::Feature", "OpenBottomHollowBox")
+feature.Shape = open_bottom_box
+
+feature.Label = "Open Bottom Hollow Box 100x80x80mm"
+doc.recompute()
+
+try:
+    macro_dir = Path(__file__).resolve().parent
+except NameError:
+    macro_dir = Path.cwd()
+
+output_path = macro_dir / OUTPUT_FILE
+try:
+    doc.saveAs(str(output_path))
+    App.Console.PrintMessage(f"Saved FreeCAD document to: {output_path}\n")
+except Exception as exc:
+    App.Console.PrintWarning(f"Model created, but save failed: {exc}\n")
+
+App.ActiveDocument = doc
+App.Console.PrintMessage("Model created successfully.\n")

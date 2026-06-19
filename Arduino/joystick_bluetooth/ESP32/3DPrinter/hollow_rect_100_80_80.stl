@@ -1,0 +1,198 @@
+solid hollow_rect_100_80_80
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 0.000000 0.000000 80.000000
+      vertex 0.000000 80.000000 80.000000
+      vertex 100.000000 80.000000 80.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 0.000000 0.000000 80.000000
+      vertex 100.000000 80.000000 80.000000
+      vertex 100.000000 0.000000 80.000000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 0.000000 0.000000 0.000000
+      vertex 0.000000 0.000000 80.000000
+      vertex 100.000000 0.000000 80.000000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 0.000000 0.000000 0.000000
+      vertex 100.000000 0.000000 80.000000
+      vertex 100.000000 0.000000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 100.000000 0.000000 0.000000
+      vertex 100.000000 0.000000 80.000000
+      vertex 100.000000 80.000000 80.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 100.000000 0.000000 0.000000
+      vertex 100.000000 80.000000 80.000000
+      vertex 100.000000 80.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 100.000000 80.000000 0.000000
+      vertex 100.000000 80.000000 80.000000
+      vertex 0.000000 80.000000 80.000000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 100.000000 80.000000 0.000000
+      vertex 0.000000 80.000000 80.000000
+      vertex 0.000000 80.000000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 -0.000000
+    outer loop
+      vertex 0.000000 80.000000 0.000000
+      vertex 0.000000 80.000000 80.000000
+      vertex 0.000000 0.000000 80.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.000000 80.000000 0.000000
+      vertex 0.000000 0.000000 80.000000
+      vertex 0.000000 0.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 2.000000 2.000000 78.000000
+      vertex 98.000000 2.000000 78.000000
+      vertex 98.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 2.000000 2.000000 78.000000
+      vertex 98.000000 78.000000 78.000000
+      vertex 2.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 2.000000 2.000000 0.000000
+      vertex 98.000000 2.000000 0.000000
+      vertex 98.000000 2.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 2.000000 2.000000 0.000000
+      vertex 98.000000 2.000000 78.000000
+      vertex 2.000000 2.000000 78.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 98.000000 2.000000 0.000000
+      vertex 98.000000 78.000000 0.000000
+      vertex 98.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 98.000000 2.000000 0.000000
+      vertex 98.000000 78.000000 78.000000
+      vertex 98.000000 2.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 98.000000 78.000000 0.000000
+      vertex 2.000000 78.000000 0.000000
+      vertex 2.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 -0.000000
+    outer loop
+      vertex 98.000000 78.000000 0.000000
+      vertex 2.000000 78.000000 78.000000
+      vertex 98.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 2.000000 78.000000 0.000000
+      vertex 2.000000 2.000000 0.000000
+      vertex 2.000000 2.000000 78.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 2.000000 78.000000 0.000000
+      vertex 2.000000 2.000000 78.000000
+      vertex 2.000000 78.000000 78.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.000000 0.000000 0.000000
+      vertex 100.000000 0.000000 0.000000
+      vertex 98.000000 2.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.000000 0.000000 0.000000
+      vertex 98.000000 2.000000 0.000000
+      vertex 2.000000 2.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 -0.000000 1.000000
+    outer loop
+      vertex 100.000000 0.000000 0.000000
+      vertex 100.000000 80.000000 0.000000
+      vertex 98.000000 78.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 100.000000 0.000000 0.000000
+      vertex 98.000000 78.000000 0.000000
+      vertex 98.000000 2.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 100.000000 80.000000 0.000000
+      vertex 0.000000 80.000000 0.000000
+      vertex 2.000000 78.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 100.000000 80.000000 0.000000
+      vertex 2.000000 78.000000 0.000000
+      vertex 98.000000 78.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.000000 80.000000 0.000000
+      vertex 0.000000 0.000000 0.000000
+      vertex 2.000000 2.000000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.000000 80.000000 0.000000
+      vertex 2.000000 2.000000 0.000000
+      vertex 2.000000 78.000000 0.000000
+    endloop
+  endfacet
+endsolid hollow_rect_100_80_80
