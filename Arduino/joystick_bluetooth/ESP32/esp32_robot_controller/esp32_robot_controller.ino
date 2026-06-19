@@ -60,6 +60,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <string.h>
 
 // ============================================================
 //  WiFi 配置（修改为实际 SSID / 密码）
@@ -67,6 +68,8 @@
 static constexpr char WIFI_SSID[]    = "your_ssid";      // ← 修改
 static constexpr char WIFI_PASS[]    = "your_password";  // ← 修改
 static constexpr char HIT_API_URL[]  = "https://mock.test.com/hit";
+static constexpr char tankid[]       = "tank_1";
+static const char* const teamtankids[] = {"tank_1", "tank_2", "tank_3"};
 
 // ============================================================
 //  引脚定义
@@ -173,8 +176,12 @@ static void httpTask(void* /*arg*/) {
 
         HTTPClient http;
         if (http.begin(client, HIT_API_URL)) {
+            char payload[96];
+            snprintf(payload, sizeof(payload),
+                     "{\"event\":\"laser_fired\",\"tankid\":\"%s\"}",
+                     tankid);
             http.addHeader("Content-Type", "application/json");
-            int code = http.POST("{\"event\":\"laser_fired\"}");
+            int code = http.POST(reinterpret_cast<uint8_t*>(payload), strlen(payload));
             if (code > 0) {
                 Serial.printf("[HTTP]  POST %s → HTTP %d\n", HIT_API_URL, code);
             } else {
@@ -215,10 +222,155 @@ static constexpr uint32_t LASER_COOLDOWN_MS = LASER_PERIOD_MS - LASER_SHOT_MS;  
 static constexpr uint32_t LASER_LONG_MS     = 500;  // 长按判定阈值（ms）
 
 // VS1838B 命中检测
-static bool     rx_prev_high   = true;  // 上一帧 GPIO12 是否为高（HIGH = 未接收）
 static uint32_t rx_cooldown_ms = 0;     // 命中冷却结束时刻，防重复计数
 
 static constexpr uint32_t HIT_COOLDOWN_MS = 600;  // 同一命中最短间隔（ms）
+static constexpr uint8_t  TEAM_TANK_COUNT           = sizeof(teamtankids) / sizeof(teamtankids[0]);
+static constexpr uint8_t  LASER_PACKET_MAGIC        = 0xA5;
+static constexpr uint8_t  LASER_PACKET_MAX_TANKID   = 16;
+static constexpr uint8_t  LASER_PACKET_MAX_BYTES    = LASER_PACKET_MAX_TANKID + 3;
+static constexpr uint8_t  LASER_PACKET_REPEAT_COUNT = 1;
+static constexpr uint16_t LASER_HDR_MARK_US         = 9000;
+static constexpr uint16_t LASER_HDR_SPACE_US        = 4500;
+static constexpr uint16_t LASER_BIT_MARK_US         = 560;
+static constexpr uint16_t LASER_ONE_SPACE_US        = 1690;
+static constexpr uint16_t LASER_ZERO_SPACE_US       = 560;
+static constexpr uint16_t LASER_FRAME_GAP_US        = 12000;
+static constexpr uint16_t LASER_RX_TOLERANCE_US     = 250;
+static constexpr uint16_t LASER_RX_FRAME_TIMEOUT_US = 5000;
+static constexpr uint8_t  LASER_RX_MAX_TIMINGS      = 96;
+
+static volatile uint16_t laser_rx_timings[LASER_RX_MAX_TIMINGS];
+static volatile uint8_t  laser_rx_timing_count = 0;
+static volatile uint32_t laser_rx_last_edge_us = 0;
+static volatile bool     laser_rx_capturing    = false;
+
+static char last_rx_tankid[LASER_PACKET_MAX_TANKID + 1] = "";
+
+static uint8_t boundedStrLen(const char* text, uint8_t max_len) {
+    uint8_t len = 0;
+    while (len < max_len && text[len] != '\0') {
+        ++len;
+    }
+    return len;
+}
+
+static uint8_t laserPacketChecksum(const uint8_t* data, uint8_t len) {
+    uint8_t checksum = 0;
+    for (uint8_t i = 0; i < len; ++i) {
+        checksum ^= data[i];
+    }
+    return checksum;
+}
+
+static bool isTeamTankId(const char* candidate) {
+    for (uint8_t i = 0; i < TEAM_TANK_COUNT; ++i) {
+        if (strcmp(candidate, teamtankids[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool laserDurationNear(uint16_t actual, uint16_t expected) {
+    return actual + LASER_RX_TOLERANCE_US >= expected
+        && actual <= expected + LASER_RX_TOLERANCE_US;
+}
+
+static uint8_t buildLaserPacket(const char* source_tankid, uint8_t* packet, uint8_t packet_size) {
+    const uint8_t payload_len = boundedStrLen(source_tankid, LASER_PACKET_MAX_TANKID);
+    const uint8_t total_len   = payload_len + 3;
+
+    if (payload_len == 0 || source_tankid[payload_len] != '\0' || total_len > packet_size) {
+        return 0;
+    }
+
+    packet[0] = LASER_PACKET_MAGIC;
+    packet[1] = payload_len;
+    memcpy(packet + 2, source_tankid, payload_len);
+    packet[2 + payload_len] = laserPacketChecksum(packet, payload_len + 2);
+    return total_len;
+}
+
+static bool decodeLaserPacket(const uint16_t* timings,
+                              uint8_t timing_count,
+                              char* out_tankid,
+                              uint8_t out_size) {
+    if (timing_count < 9 || !laserDurationNear(timings[0], LASER_HDR_MARK_US)
+        || !laserDurationNear(timings[1], LASER_HDR_SPACE_US)
+        || !laserDurationNear(timings[timing_count - 1], LASER_BIT_MARK_US)) {
+        return false;
+    }
+
+    uint8_t packet[LASER_PACKET_MAX_BYTES] = {0};
+    uint8_t bit_index = 0;
+    for (uint8_t i = 2; i + 1 < timing_count - 1; i += 2) {
+        if (bit_index >= LASER_PACKET_MAX_BYTES * 8) {
+            return false;
+        }
+
+        if (!laserDurationNear(timings[i], LASER_BIT_MARK_US)) {
+            return false;
+        }
+
+        const uint16_t space_us = timings[i + 1];
+        if (laserDurationNear(space_us, LASER_ONE_SPACE_US)) {
+            packet[bit_index / 8] |= (1u << (bit_index % 8));
+        } else if (!laserDurationNear(space_us, LASER_ZERO_SPACE_US)) {
+            return false;
+        }
+        ++bit_index;
+    }
+
+    if ((bit_index % 8) != 0) {
+        return false;
+    }
+
+    const uint8_t packet_len = bit_index / 8;
+    if (packet_len < 3 || packet[0] != LASER_PACKET_MAGIC) {
+        return false;
+    }
+
+    const uint8_t payload_len = packet[1];
+    const uint8_t expected_len = payload_len + 3;
+    if (payload_len == 0 || payload_len > LASER_PACKET_MAX_TANKID
+        || expected_len != packet_len || payload_len >= out_size) {
+        return false;
+    }
+
+    if (packet[expected_len - 1] != laserPacketChecksum(packet, expected_len - 1)) {
+        return false;
+    }
+
+    memcpy(out_tankid, packet + 2, payload_len);
+    out_tankid[payload_len] = '\0';
+    return true;
+}
+
+void IRAM_ATTR onLaserRxEdge() {
+    const uint32_t now = micros();
+    const bool rx_high = (digitalRead(PIN_LASER_RX) == HIGH);
+
+    if (!laser_rx_capturing) {
+        if (!rx_high) {
+            laser_rx_capturing = true;
+            laser_rx_timing_count = 0;
+            laser_rx_last_edge_us = now;
+        }
+        return;
+    }
+
+    const uint32_t pulse_us = now - laser_rx_last_edge_us;
+    laser_rx_last_edge_us = now;
+
+    if (laser_rx_timing_count >= LASER_RX_MAX_TIMINGS) {
+        laser_rx_capturing = false;
+        laser_rx_timing_count = 0;
+        return;
+    }
+
+    laser_rx_timings[laser_rx_timing_count++] = static_cast<uint16_t>(pulse_us > 65535u ? 65535u : pulse_us);
+}
 
 // ============================================================
 //  PS2 底层：单字节收发（CLK 空闲高，LSB-first）
@@ -358,9 +510,59 @@ static void coastStop() {
 //  激光控制（LEDC 38 kHz）
 // ============================================================
 
-// 开启激光：输出 38 kHz 50% 占空比 PWM，并通知 HTTP 任务上报命中
-static inline void laserOn() {
+static inline void laserCarrierOn() {
     ledcWrite(PIN_LASER_TX, LASER_DUTY_ON);
+}
+
+static inline void laserCarrierOff() {
+    ledcWrite(PIN_LASER_TX, 0);
+}
+
+static inline void laserMark(uint16_t duration_us) {
+    laserCarrierOn();
+    delayMicroseconds(duration_us);
+}
+
+static inline void laserSpace(uint16_t duration_us) {
+    laserCarrierOff();
+    if (duration_us > 0) {
+        delayMicroseconds(duration_us);
+    }
+}
+
+static void sendLaserPacketOnce(const uint8_t* packet, uint8_t packet_len) {
+    laserMark(LASER_HDR_MARK_US);
+    laserSpace(LASER_HDR_SPACE_US);
+
+    for (uint8_t byte_idx = 0; byte_idx < packet_len; ++byte_idx) {
+        uint8_t value = packet[byte_idx];
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            laserMark(LASER_BIT_MARK_US);
+            laserSpace((value & 0x01) ? LASER_ONE_SPACE_US : LASER_ZERO_SPACE_US);
+            value >>= 1;
+        }
+    }
+
+    laserMark(LASER_BIT_MARK_US);
+    laserSpace(0);
+}
+
+// 开启激光：发送带 tankid 的红外数据帧，并通知 HTTP 任务上报
+static inline void laserOn() {
+    uint8_t packet[LASER_PACKET_MAX_BYTES] = {0};
+    const uint8_t packet_len = buildLaserPacket(tankid, packet, sizeof(packet));
+    if (packet_len == 0) {
+        Serial.println("[Laser]  tankid 无效，跳过发射");
+        return;
+    }
+
+    for (uint8_t i = 0; i < LASER_PACKET_REPEAT_COUNT; ++i) {
+        sendLaserPacketOnce(packet, packet_len);
+        if (i + 1 < LASER_PACKET_REPEAT_COUNT) {
+            laserSpace(LASER_FRAME_GAP_US);
+        }
+    }
+
     // 非阻塞投递：若队列已满则丢弃（不影响实时控制）
     const uint8_t sig = 1;
     xQueueSend(http_queue, &sig, 0);
@@ -368,7 +570,7 @@ static inline void laserOn() {
 
 // 关闭激光：占空比 = 0
 static inline void laserOff() {
-    ledcWrite(PIN_LASER_TX, 0);
+    laserCarrierOff();
 }
 
 /**
@@ -467,20 +669,50 @@ static void ledsAddHit() {
 // ============================================================
 
 /**
- * updateHitDetect() — 检测 GPIO12 下降沿（HIGH→LOW）
- * VS1838B 接收到 38 kHz 激光时 OUT 输出低电平
- * 应用 600ms 冷却防止同一数据包重复计数
+ * updateHitDetect() — 解析 GPIO12 上的红外数据帧
+ * payload 为发射方 tankid；若不在 teamtankids 中，则视为敌方命中
  */
 static void updateHitDetect() {
-    const uint32_t now      = millis();
-    const bool     rx_high  = (digitalRead(PIN_LASER_RX) == HIGH);
+    const uint32_t now_ms = millis();
+    const uint32_t now_us = micros();
+    uint16_t timings[LASER_RX_MAX_TIMINGS] = {0};
+    uint8_t timing_count = 0;
 
-    // 下降沿（HIGH→LOW）且冷却已过
-    if (rx_prev_high && !rx_high && (now >= rx_cooldown_ms)) {
-        rx_cooldown_ms = now + HIT_COOLDOWN_MS;
+    noInterrupts();
+    if (laser_rx_capturing && laser_rx_timing_count > 0
+        && (now_us - laser_rx_last_edge_us) >= LASER_RX_FRAME_TIMEOUT_US) {
+        timing_count = laser_rx_timing_count;
+        for (uint8_t i = 0; i < timing_count; ++i) {
+            timings[i] = laser_rx_timings[i];
+        }
+        laser_rx_capturing = false;
+        laser_rx_timing_count = 0;
+    }
+    interrupts();
+
+    if (timing_count == 0) {
+        return;
+    }
+
+    char received_tankid[LASER_PACKET_MAX_TANKID + 1] = {0};
+    if (!decodeLaserPacket(timings, timing_count, received_tankid, sizeof(received_tankid))) {
+        Serial.println("[LaserRX] 收到无效数据帧，已忽略");
+        return;
+    }
+
+    strncpy(last_rx_tankid, received_tankid, sizeof(last_rx_tankid) - 1);
+    last_rx_tankid[sizeof(last_rx_tankid) - 1] = '\0';
+
+    if (isTeamTankId(received_tankid)) {
+        Serial.printf("[LaserRX] Friendly/self tankid=%s, ignore\n", received_tankid);
+        return;
+    }
+
+    if (now_ms >= rx_cooldown_ms) {
+        rx_cooldown_ms = now_ms + HIT_COOLDOWN_MS;
+        Serial.printf("[LaserRX] Enemy tankid=%s\n", received_tankid);
         ledsAddHit();
     }
-    rx_prev_high = rx_high;
 }
 
 // ============================================================
@@ -541,6 +773,7 @@ void setup() {
 
     // ── VS1838B 激光接收器初始化 ────────────────
     pinMode(PIN_LASER_RX, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_LASER_RX), onLaserRxEdge, CHANGE);
     Serial.printf("[LaserRX] RX=GPIO%d, INPUT_PULLUP  OK\n", PIN_LASER_RX);
 
     // ── WS2812B LED 灯条初始化 ───────────────────
@@ -589,6 +822,7 @@ void setup() {
     Serial.println("  L2 short press = laser shot (200ms)");
     Serial.println("  L2 long press  = auto laser (300ms cycle)");
     Serial.println("  R2 press       = reset LEDs to green");
+    Serial.printf("[Laser]  tankid=%s\n", tankid);
     Serial.println("========================================\n");
 }
 
