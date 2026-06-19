@@ -595,3 +595,16 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 | `ledcAttach was not declared` | BSP 版本为 v2.x | 在开发板管理器升级 esp32 BSP 到 ≥ 3.0 |
 | 编译通过但电机不动 | STBY 未拉高 / 接线错误 | 用万用表确认 GPIO 10 高电平；检查 AIN1/AIN2/BIN1/BIN2 接线 |
 | PS2 一直 `TIMEOUT` | DAT 无上拉 / VCC 接了 5V | 确认 DAT↔VCC 之间有 10kΩ；确认 YFRobot 2015 接 3.3V |
+
+### 13.6 IRremote
+
+在 Arduino IDE 里安装 IRremote 4.6+，直接编译这份草图。
+先用两台车验证 tankCode 映射和敌我过滤，再决定是否补更多坦克到本地映射表。
+如果 ESP32-S3 上 IRremote 有兼容性问题，我可以继续帮你改成 TinyIR 或 IRremoteESP8266 版本。
+
+现在的结构是：
+
+增加了 IRremote 依赖、tankCode 和本地映射表，tankCode -> tankid 的映射定义在 esp32_robot_controller.ino:79 和 esp32_robot_controller.ino:82。
+发射时不再发送自定义字符串脉冲帧，而是直接用 IrSender.sendNEC(LASER_IR_ADDRESS, tankCode, 0) 发一个 NEC 帧，位置在 esp32_robot_controller.ino:412。
+接收时改成 IrReceiver.decode() 读取 NEC 帧，把收到的 command 当作 tankCode，再本地映射回 tankid 并用 teamtankids 判断敌我，逻辑在 esp32_robot_controller.ino:526。
+setup() 里已经去掉旧的手写中断接收和激光 ledc 发射初始化，改成 IrSender.begin(...) / IrReceiver.begin(...)，在 esp32_robot_controller.ino:619。
