@@ -20,6 +20,9 @@ TEXT_HEIGHT_MM = 14.0
 TEXT_DEPTH_MM = 1.8
 TEXT_CENTER_Z_MM = HEIGHT_MM / 2.0
 CYLINDER_SECTIONS = 192
+RIM_WIRE_SEGMENTS = 32
+RIM_WIRE_RADIUS_MM = 2.6
+RIM_WIRE_OUTER_OVERHANG_MM = 1.2
 PIXELS_PER_MM = 12
 OUTPUT_FILE = "pen_holder_ra2026_100od_120h_3p5wall.3mf"
 FONT_CANDIDATES = [
@@ -108,22 +111,45 @@ def build_text_polygon(text: str) -> shapely.geometry.base.BaseGeometry:
 
 
 def build_holder_mesh() -> trimesh.Trimesh:
-    outer = trimesh.creation.cylinder(
-        radius=OUTER_RADIUS_MM,
-        height=HEIGHT_MM,
-        sections=CYLINDER_SECTIONS,
+    rim_center_radius_mm = (
+        OUTER_RADIUS_MM + RIM_WIRE_OUTER_OVERHANG_MM - RIM_WIRE_RADIUS_MM
     )
-    outer.apply_translation((0.0, 0.0, HEIGHT_MM / 2.0))
+    rim_center_z_mm = HEIGHT_MM - RIM_WIRE_RADIUS_MM
 
-    inner_height_mm = HEIGHT_MM - BOTTOM_THICKNESS_MM
-    inner = trimesh.creation.cylinder(
-        radius=INNER_RADIUS_MM,
-        height=inner_height_mm,
-        sections=CYLINDER_SECTIONS,
+    outer_dx_mm = OUTER_RADIUS_MM - rim_center_radius_mm
+    inner_dx_mm = INNER_RADIUS_MM - rim_center_radius_mm
+    outer_dy_mm = np.sqrt((RIM_WIRE_RADIUS_MM**2) - (outer_dx_mm**2))
+    inner_dy_mm = np.sqrt((RIM_WIRE_RADIUS_MM**2) - (inner_dx_mm**2))
+
+    outer_join = (OUTER_RADIUS_MM, rim_center_z_mm - outer_dy_mm)
+    inner_join = (INNER_RADIUS_MM, rim_center_z_mm - inner_dy_mm)
+
+    outer_theta = np.arctan2(outer_join[1] - rim_center_z_mm, outer_dx_mm)
+    inner_theta = np.arctan2(inner_join[1] - rim_center_z_mm, inner_dx_mm)
+    if inner_theta <= outer_theta:
+        inner_theta += 2.0 * np.pi
+
+    rim_thetas = np.linspace(outer_theta, inner_theta, RIM_WIRE_SEGMENTS + 1)
+    rim_curve = np.column_stack(
+        [
+            rim_center_radius_mm + (RIM_WIRE_RADIUS_MM * np.cos(rim_thetas)),
+            rim_center_z_mm + (RIM_WIRE_RADIUS_MM * np.sin(rim_thetas)),
+        ]
     )
-    inner.apply_translation((0.0, 0.0, BOTTOM_THICKNESS_MM + (inner_height_mm / 2.0)))
 
-    holder = trimesh.boolean.difference([outer, inner], engine="manifold")
+    profile = np.vstack(
+        [
+            [0.0, 0.0],
+            [OUTER_RADIUS_MM, 0.0],
+            [OUTER_RADIUS_MM, outer_join[1]],
+            rim_curve[1:],
+            [INNER_RADIUS_MM, BOTTOM_THICKNESS_MM],
+            [0.0, BOTTOM_THICKNESS_MM],
+            [0.0, 0.0],
+        ]
+    )
+
+    holder = trimesh.creation.revolve(profile, sections=CYLINDER_SECTIONS)
     if holder is None or not holder.is_watertight:
         raise ValueError("Failed to build a watertight pen holder mesh.")
     return holder
