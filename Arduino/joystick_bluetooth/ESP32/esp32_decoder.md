@@ -67,7 +67,7 @@
 | 蓝牙游戏手柄 | 普通 BT 手柄（PS2 兼容） | 1 |
 | 激光发射器 | 18×45 980nm 30mW 100kHz 5V TTL 调制 | 1 |
 | 激光接收器 | VS1838B（1838）红外接收传感器，38 kHz | 1 |
-| 可编程 LED 灯条 | WS2812B 5V GRB，≥ 8 颜 | 1 条 |
+| 可编程 LED 灯条 | WS2812B 5V GRB，10 颗 | 1 条 |
 | 上拉电阻 | 10kΩ（1/4W，用于 PS2 DAT 线） | 1 |
 
 ---
@@ -97,7 +97,9 @@ GND 汇流点：D153C Vin- = ESP32 GND = YFRobot 2015 GND = 电机地（全部�
 > ⚠️ **电平兼容说明**：
 > - ESP32-S3 GPIO 为 3.3V 逻辑，**不耐 5V**
 > - YFRobot 2015 解码器如以 **5V 供电**，其 DAT 输出将为 5V 电平，可能损坏 ESP32-S3 GPIO
-> - **推荐做法：将 YFRobot 2015 接 D153C 的 3.3V 输出（而非 5V）**，使所有 PS2 信号保持 3.3V 电平，与 ESP32-S3 直接兼容，无需电平转换
+> - **推荐做法：将 YFRobot 2015 接 D153C 的 3.3V 输出（而非 5V）**，但必须确认解码器能在 3.3V 下稳定启动；若不能，DAT 必须经电平转换后再接 ESP32-S3
+
+> ⚠️ D153C 5V 输出必须有足够的峰值电流裕量，同时供电给 ESP32-S3、WS2812B 和激光发射器。应在这些负载工作、电机启动时测量 5V 母线，确认没有明显掉压；所有模块必须共地。
 
 ---
 
@@ -116,7 +118,7 @@ GND 汇流点：D153C Vin- = ESP32 GND = YFRobot 2015 GND = 电机地（全部�
 │              （DAT 线需 10kΩ 上拉至 VCC）               │
 │                                                         │
 │   内部包含：蓝牙接收模块 + PS2 协议转换芯片             │
-│   通信协议：PS2 SPI-like，约 250kHz，MSB-first          │
+│   通信协议：PS2 SPI-like，约 50kHz，LSB-first            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -206,13 +208,13 @@ YFRobot 2015 解码器                    ESP32-S3 N8R2
 
 ### 激光发射器接线
 
-> 激光发射器使用 **38 kHz TTL 调制**，由 ESP32 LEDC 外设产生载波，与 VS1838B 接收带通滤波器频率匹配。
+> 固件使用 IRremote 发送 38 kHz NEC 载波突发。激光发射器清单标注为 100 kHz TTL，必须先核对其 TTL 输入是“最大调制带宽”还是“固定 100 kHz 载波要求”；若只能接受固定 100 kHz，当前方案不能直接使用。
 
 | 激光发射器引脚 | 方向 | 连接至 | 说明 |
 |:-------------:|:----:|:------:|------|
 | **VCC** | ← | D153C **5V** 输出 | 5V 供电 |
 | **GND** | — | 公共 **GND** | 共地 |
-| **TTL** | ← | ESP32 **GPIO 11** | 38 kHz LEDC PWM，50% 占空比；duty=0 关闭激光 |
+| **TTL** | ← | ESP32 **GPIO 11** | IRremote 生成 38 kHz NEC 载波突发；需确认发射器 TTL 输入兼容 38 kHz |
 
 ### VS1838B 激光接收器接线
 
@@ -241,11 +243,11 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 
 | WS2812B 引脚 | 方向 | 连接至 | 说明 |
 |:-----------:|:----:|:------:|------|
-| **5V** | ← | D153C **5V** 输出 | 5V 供电（⚠️ 每颜全亮白色约 60mA，8 颜不超过 480mA） |
+| **5V** | ← | D153C **5V** 输出 | 5V 供电（⚠️ 每颗全亮白色约 60mA，10 颗不超过 600mA） |
 | **GND** | — | 公共 **GND** | 共地 |
 | **DIN** | ← | ESP32 **GPIO 13** | FastLED 数据线（GRB 色序） |
 
-> ⚠️ **功耗提示**：代码中亮度设为 60（约23%），8 颜 实际峰値电流约 110mA，D153C 5V 输出可支撴。若增加 LED 数量，请确认 D153C 5V 输出电流预留量。
+> ⚠️ **功耗提示**：代码中亮度设为 60（约23%），10 颗实际峰值电流约 140mA；仍须确认 D153C 5V 输出有足够电流余量。
 
 ---
 
@@ -260,7 +262,7 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 | **GPIO 8** | 输出 | Digital OUT | TB6612 **BIN1** | 右电机方向1 |
 | **GPIO 9** | 输出 | Digital OUT | TB6612 **BIN2** | 右电机方向2 |
 | **GPIO 10** | 输出 | Digital OUT | TB6612 **STBY** | 驱动器使能 |
-| **GPIO 11** | 输出 | LEDC PWM | 激光发射器 **TTL** | 38 kHz 载波，50% 占空比 |
+| **GPIO 11** | 输出 | IRremote 定时器 | 激光发射器 **TTL** | 38 kHz NEC 载波突发 |
 | **GPIO 12** | 输入 | Digital IN | VS1838B **OUT** | Active LOW，INPUT_PULLUP，接收激光命中 |
 | **GPIO 13** | 输出 | Digital OUT | WS2812B **DIN** | FastLED GRB 数据线 |
 | **GPIO 15** | 输出 | Digital OUT | YFRobot 2015 **CS** | PS2 片选（Active LOW） |
@@ -292,7 +294,7 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 │  14  46   (空闲)                                          │
 │  15  9    → D153C BIN2                                    │
 │  16  10   → D153C STBY                                    │
-│  17  11   → 激光发射器 TTL（38kHz LEDC PWM）          │
+│  17  11   → 激光发射器 TTL（38kHz NEC 载波突发）      │
 │  18  12   ← VS1838B OUT（INPUT_PULLUP，Active LOW）    │
 │  19  13   → WS2812B DIN（FastLED 数据线）             │
 │  20  5V   ← D153C 5V输出（ESP32供电）                     │
@@ -390,20 +392,20 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
   │  激光发射器（18×45 980nm 30mW，5V TTL）                       │
   │    VCC ◄──── D153C 5V 输出                                   │
   │    GND ────► 公共 GND                                        │
-  │    TTL ◄──── ESP32 GPIO 11（38kHz LEDC PWM，50% duty）     │
+        │    TTL ◄──── ESP32 GPIO 11（38kHz NEC 载波突发）           │
   │                                                                 │
   │  VS1838B 激光接收器（38kHz 解调）                              │
   │    VCC ◄──── D153C 3.3V 输出                                 │
   │    GND ────► 公共 GND                                        │
   │    OUT ────► ESP32 GPIO 12（INPUT_PULLUP，Active LOW）        │
   │                                                                 │
-  │  WS2812B 可编程 LED 灯条（8 颜，GRB）                          │
+      │  WS2812B 可编程 LED 灯条（10 颗，GRB）                         │
   │    5V  ◄──── D153C 5V 输出                                   │
   │    GND ────► 公共 GND                                        │
   │    DIN ◄──── ESP32 GPIO 13（FastLED 单线协议）              │
   │                                                                 │
   │  控制逻辑：                                                    │
-  │    L2 短按 → 发射 1 次激光（200ms）                          │
+        │    L2 短按 → 发送 1 帧 NEC 激光数据                          │
   │    L2 长按 → 每 300ms 自动循环发射                         │
   │    R2 按下 → WS2812B 全部恢复绿色（重置命中计数）           │
   └────────────────────────────────────────────────────────────────┘
@@ -458,15 +460,17 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 
 | 按键 | 操作 | 功能 | 说明 |
 |:----:|------|------|------|
-| **L2** | 短按（按下 < 500ms 后松开） | **发射一次激光**（200ms 脉冲） | 38 kHz 载波触发 VS1838B |
-| **L2** | 长按（持续 ≥ 500ms） | **循环自动发射**（每 300ms 一次） | 200ms 发射 + 100ms 冷却，持续循环 |
+| **L2** | 短按（按下 < 500ms 后松开） | **发送一帧 NEC 激光数据** | 38 kHz 载波触发 VS1838B |
+| **L2** | 长按（持续 ≥ 500ms） | **循环发送 NEC 帧**（每 300ms 一次） | 每帧之间保留 100ms 冷却 |
 | **R2** | 按下（边沿触发） | **重置 LED 灯条为全绿** | 清除命中记录，hit_count 归零 |
+
+> 注意：L2 是发射操作，不会让本机 LED 变红。LED 只有在 VS1838B 收到已注册的**敌方** NEC 帧时才变红；本机和队友的 tankCode 会被忽略。单机调试可在固件中将 `LOCAL_LED_TEST_ON_FIRE` 临时改为 `true`，让每次 L2 发射模拟一次命中，比赛前必须改回 `false`。
 
 ### 10.5 VS1838B 激光命中逻辑
 
 | 事件 | 触发条件 | 效果 |
 |:----:|---------|------|
-| **命中** | GPIO 12 检测到下降沿（HIGH→LOW）且冷却已过（600ms） | 下一颜 LED 变红（从索引 0 到 7 逐个点亮） |
+| **命中** | GPIO 12 收到有效 NEC 帧，地址为 0x42、tankCode 已注册、且该 tankCode 不属于本队，冷却已过（600ms） | 下一颗 LED 变红（从索引 0 到 9 逐个点亮） |
 | **重置** | R2 按下 | 所有 LED 恢复绿色，命中计数清零 |
 | **上电** | 初始化时 | 所有 LED 初始化为绿色 |
 ---
@@ -505,17 +509,19 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 | 1 | **3.3V 供电 YFRobot 2015** | YFRobot 2015 必须接 3.3V（非 5V），否则 DAT 输出 5V 可能损坏 ESP32-S3 GPIO |
 | 2 | **DAT 上拉电阻** | DAT（GPIO 18）与 YFRobot VCC（3.3V）之间接 10kΩ 上拉电阻，保证空闲时 DAT 维持高电平 |
 | 3 | **共地** | 电池组、D153C、ESP32、YFRobot 2015 的 GND 全部短接至公共汇流点 |
-| 4 | **STBY 使能** | 若无需动态休眠，可将 STBY 直接接 3.3V 常高，GPIO 10 可释放；正常使用时保持 HIGH |
+| 4 | **STBY 使能** | STBY 必须接 GPIO 10；代码启动和 PS2 失联时保持 LOW，只有 PWM 初始化成功且 PS2 模拟帧有效后才置 HIGH，不要再把 STBY 直接接 3.3V |
 | 5 | **GPIO 禁用范围** | GPIO 26~32 被 Flash 占用，GPIO 35~37 被 PSRAM 占用，**绝对禁止**用作普通 IO |
 | 6 | **电机转向校正** | 若实测某电机转向与预期相反，互换该电机的两根输出线（AO1↔AO2 或 BO1↔BO2），无需修改代码 |
-| 7 | **PS2 通信频率** | PS2 软件 SPI 时钟约 250kHz，每次查询约需 5ms，建议控制主循环周期 ≥ 10ms |
+| 7 | **PS2 通信频率** | 当前固件软件 SPI 时钟约 50kHz（每位周期约 20µs），每次 9 字节查询约 2ms；运行中允许短暂丢帧，连续 250ms 没有有效帧才触发电机失联保护 |
 | 8 | **蓝牙配对** | YFRobot 2015 解码器与手柄需先完成蓝牙配对；解码器上电后按手柄 PS 键进行配对 |
 | 9 | **死区调整** | 代码中的死区阈值（96/160）可根据实际摇杆漂移量调整，建议先串口打印 LX/LY 原始值确认中心偏差 |
 | 10 | **电池容量** | 两个 12V 电机在 7.4V 下启动电流可达 2~4A，确认 18650 电池持续放电倍率 ≥ 2C |
 | 11 | **FastLED 库** | WS2812B 控制需安装 **FastLED ≥ 3.6.0**（Arduino IDE → 工具 → 管理库 → 搜索 `FastLED` 安装） |
-| 12 | **WS2812B 数据线电平** | WS2812B DIN 封装内部兼容 3.3V，ESP32 GPIO 13（3.3V）可直接驱动，无需电平转换 |
+| 12 | **WS2812B 数据线电平** | 5V 供电时不能假定所有 WS2812B 都可靠识别 3.3V 高电平；推荐使用 5V 供电的 74AHCT125/74HCT245 电平转换器，GPIO 13 不得接收 5V |
 | 13 | **VS1838B 供电** | VS1838B 接 D153C 3.3V（兼容 ESP32 GPIO 12 电平）；若接 5V 则 OUT 为 5V，需电平转换才能接 ESP32 |
-| 14 | **激光安全** | 980nm 近红外激光，肉眼不可见但会伤害视网膜，请勿直视发射口，避免对准人眼 |
+| 14 | **激光 TTL 电平** | GPIO 11 只有 3.3V 高电平；必须核对发射器 TTL 输入 VIH。若 3.3V 不能保证高电平，使用 5V 供电的 74AHCT125 等电平转换器 |
+| 15 | **激光安全** | 980nm 近红外激光，肉眼不可见但会伤害视网膜，请勿直视发射口，避免对准人眼 |
+| 16 | **电机供电** | 电机标称 12V，而本方案电池为 2 节串联约 7.4V；电机将降速、降扭矩，必须实测启动/堵转电流并确认 D153C 和电池/BMS 不过流 |
 
 ---
 
@@ -576,10 +582,10 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
       YFRobot 2015 + TB6612 D153C
       Laser TX/RX + WS2812B LED
      ========================================
-     [TB6612] STBY=HIGH, PWM 20kHz 8-bit  OK
-     [Laser]  TX=GPIO11, 38kHz 8-bit  OK
+        [TB6612] STBY=LOW, PWM 20kHz 8-bit OK
+        [Laser]  TX=GPIO11, NEC address=0x42, tankCode=0x01  OK
      [LaserRX] RX=GPIO12, INPUT_PULLUP  OK
-     [LED]    WS2812B x8, GPIO13, brightness=60  OK
+      [LED]    WS2812B x10, GPIO13, brightness=60  OK
      [PS2]   Waiting for YFRobot 2015 decoder......  OK
      [PS2]   Analog mode confirmed (ID=0x73)
      [Ready] Left joystick → motor control
@@ -594,17 +600,19 @@ VS1838B 封装引脚（正面朝向自己，凸面朝上）：
 | `Connecting...` 超时 | 未进入下载模式 | 按步骤④手动触发 BOOT+RST |
 | `ledcAttach was not declared` | BSP 版本为 v2.x | 在开发板管理器升级 esp32 BSP 到 ≥ 3.0 |
 | 编译通过但电机不动 | STBY 未拉高 / 接线错误 | 用万用表确认 GPIO 10 高电平；检查 AIN1/AIN2/BIN1/BIN2 接线 |
-| PS2 一直 `TIMEOUT` | DAT 无上拉 / VCC 接了 5V | 确认 DAT↔VCC 之间有 10kΩ；确认 YFRobot 2015 接 3.3V |
+| PS2 一直 `TIMEOUT` 或运行中频繁出现 `Invalid frame` | DAT 无上拉、供电掉压、共地不良、蓝牙未配对或通信线受电机干扰 | 确认 DAT↔VCC 之间有 10kΩ；确认 YFRobot 2015 接稳定的 3.3V；所有模块共地；先断开电机测试；缩短 CLK/CMD/DAT/CS 线并远离电机线；查看串口打印的 9 字节原始帧 |
+| 电机偶发停顿但之后自动恢复 | PS2 瞬时丢帧 | 当前固件会容忍短暂丢帧；若连续 250ms 无有效帧才关闭 STBY。若仍频繁停顿，优先检查 YFRobot 供电、DAT 上拉和电机启动造成的电源压降 |
 
 ### 13.6 IRremote
 
-在 Arduino IDE 里安装 IRremote 4.6+，直接编译这份草图。
+在 Arduino IDE 里安装 IRremote 4.6+，直接编译这份草图。当前固件发送的是一帧 38kHz NEC 数据，不是持续 200ms 的激光载波；长按时每 300ms 发送一帧。
+激光发射器清单标注为 100kHz TTL，而 VS1838B 需要 38kHz 载波。必须确认该发射器的 TTL 输入能够接受 38kHz 门控信号；若它只支持固定 100kHz 调制，当前 NEC 方案不能直接使用。
 先用两台车验证 tankCode 映射和敌我过滤，再决定是否补更多坦克到本地映射表。
 如果 ESP32-S3 上 IRremote 有兼容性问题，我可以继续帮你改成 TinyIR 或 IRremoteESP8266 版本。
 
 现在的结构是：
 
 增加了 IRremote 依赖、tankCode 和本地映射表，tankCode -> tankid 的映射定义在 esp32_robot_controller.ino:79 和 esp32_robot_controller.ino:82。
-发射时不再发送自定义字符串脉冲帧，而是直接用 IrSender.sendNEC(LASER_IR_ADDRESS, tankCode, 0) 发一个 NEC 帧，位置在 esp32_robot_controller.ino:412。
-接收时改成 IrReceiver.decode() 读取 NEC 帧，把收到的 command 当作 tankCode，再本地映射回 tankid 并用 teamtankids 判断敌我，逻辑在 esp32_robot_controller.ino:526。
-setup() 里已经去掉旧的手写中断接收和激光 ledc 发射初始化，改成 IrSender.begin(...) / IrReceiver.begin(...)，在 esp32_robot_controller.ino:619。
+发射时不再发送自定义字符串脉冲帧，而是直接用 `IrSender.sendNEC(LASER_IR_ADDRESS, tankCode, 0)` 发一个 NEC 帧。
+接收时改成 `IrReceiver.decode()` 读取 NEC 帧，把收到的 command 当作 tankCode，再本地映射回 tankid 并用 teamtankids 判断敌我。
+setup() 里使用 `IrSender.begin(...)` / `IrReceiver.begin(...)`，电机只有在 PS2 模拟帧有效且 PWM 初始化成功后才释放 STBY。

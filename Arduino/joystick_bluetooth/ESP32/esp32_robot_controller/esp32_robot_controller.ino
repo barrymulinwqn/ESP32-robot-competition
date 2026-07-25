@@ -20,7 +20,7 @@
  *  激光发射器（18×45 980nm 30mW，100kHz TTL）：
  *    VCC → D153C 5V 输出
  *    GND → 公共 GND
- *    TTL → GPIO 11（38 kHz LEDC PWM，50% 占空比）
+ *    TTL → GPIO 11（IRremote 生成的 38 kHz NEC 载波突发）
  *
  *  VS1838B 激光接收器：
  *    VCC → D153C 3.3V 输出
@@ -42,8 +42,8 @@
  *  左摇杆（LX/LY，0~255，中心=128，死区 96~160）：运动控制
  *    LY<96  前进  LY>160  后退  LX<96  左  LX>160  右（组合见下）
  *
- *  L2 短按（按下 < 500ms 后松开）：发射一次激光（200ms 脉冲）
- *  L2 长按（持续 ≥ 500ms）：每 300ms 自动循环发射激光
+ *  L2 短按（按下 < 500ms 后松开）：发送一帧 NEC 激光数据
+ *  L2 长按（持续 ≥ 500ms）：每 300ms 自动循环发送一帧 NEC
  *  R2 按下：WS2812B 全部恢复绿色（重置命中计数）
  *
  * ─── VS1838B 命中逻辑──────────────────────────────────────────
@@ -126,8 +126,10 @@ static constexpr uint8_t  LEDC_RES       = 8;      // 8-bit 分辨率（0~255）
 // ============================================================
 //  WS2812B LED 配置
 // ============================================================
-static constexpr uint8_t NUM_LEDS       = 8;   // 灯条 LED 总数（按实物修改）
+static constexpr uint8_t NUM_LEDS       = 10;  // 灯条 LED 总数
 static constexpr uint8_t LED_BRIGHTNESS = 60;  // 亮度（0~255，60≈23%，护眼）
+// 单机调试时可设为 true，让每次 L2 发射直接模拟一次命中；比赛时必须保持 false。
+static constexpr bool LOCAL_LED_TEST_ON_FIRE = false;
 
 // ============================================================
 //  摇杆死区阈值（PS2 坐标 0~255，中心 = 128）
@@ -215,6 +217,13 @@ static void httpTask(void* /*arg*/) {
 // ============================================================
 static uint8_t ps2_buf[PS2_FRAME_LEN];  // PS2 收发缓冲区
 static bool    ps2_connected = false;   // 解码器连接状态
+static uint32_t ps2_last_valid_ms = 0;
+static uint32_t ps2_last_invalid_log_ms = 0;
+static uint16_t ps2_invalid_frames = 0;
+
+// 无效帧可能只是蓝牙解码器的瞬时丢帧；连续超时才执行失联保护。
+static constexpr uint32_t PS2_LOSS_TIMEOUT_MS = 250;
+static constexpr uint32_t PS2_INVALID_LOG_INTERVAL_MS = 1000;
 
 // WS2812B LED 数组（FastLED 管理）
 static CRGB   leds[NUM_LEDS];
@@ -232,13 +241,15 @@ static bool       l2_prev          = false; // 上一帧 L2 是否按下
 static uint32_t   l2_press_time_ms = 0;     // L2 本次按下的起始时刻
 static bool       laser_auto       = false; // true = 正处于长按连发模式
 
-static constexpr uint32_t LASER_SHOT_MS     = 200;  // 单次发射持续时间（ms）
+static constexpr uint32_t LASER_FRAME_GUARD_MS = 200;  // NEC 帧后的最短状态保护时间（ms）
 static constexpr uint32_t LASER_PERIOD_MS   = 300;  // 连发总周期（ms）
-static constexpr uint32_t LASER_COOLDOWN_MS = LASER_PERIOD_MS - LASER_SHOT_MS;  // 100 ms
+static constexpr uint32_t LASER_COOLDOWN_MS = LASER_PERIOD_MS - LASER_FRAME_GUARD_MS;  // 100 ms
 static constexpr uint32_t LASER_LONG_MS     = 500;  // 长按判定阈值（ms）
 
 // VS1838B 命中检测
-static uint32_t rx_cooldown_ms = 0;     // 命中冷却结束时刻，防重复计数
+static uint32_t last_hit_ms = 0;
+static uint8_t  last_hit_tankcode = 0;
+static bool     has_last_hit = false;
 
 static constexpr uint32_t HIT_COOLDOWN_MS = 600;  // 同一命中最短间隔（ms）
 static constexpr uint8_t  TEAM_TANK_COUNT   = sizeof(teamtankids) / sizeof(teamtankids[0]);
@@ -247,6 +258,8 @@ static constexpr uint16_t LASER_IR_ADDRESS  = 0x42;
 
 static char    last_rx_tankid[16] = "";
 static uint8_t last_rx_tankcode   = 0;
+static bool    motor_pwm_ready     = false;
+static bool    r2_prev             = false;
 
 static const char* lookupTankIdByCode(uint8_t code) {
     for (uint8_t i = 0; i < TANK_REGISTRY_LEN; ++i) {
@@ -334,13 +347,17 @@ static bool ps2_poll() {
 static inline void motorA(uint8_t ain1, uint8_t ain2, uint8_t pwm) {
     digitalWrite(PIN_AIN1, ain1);
     digitalWrite(PIN_AIN2, ain2);
-    ledcWrite(PIN_PWMA, pwm);  // v3.x：以引脚号写入占空比
+    if (motor_pwm_ready) {
+        ledcWrite(PIN_PWMA, pwm);  // v3.x：以引脚号写入占空比
+    }
 }
 
 static inline void motorB(uint8_t bin1, uint8_t bin2, uint8_t pwm) {
     digitalWrite(PIN_BIN1, bin1);
     digitalWrite(PIN_BIN2, bin2);
-    ledcWrite(PIN_PWMB, pwm);  // v3.x：以引脚号写入占空比
+    if (motor_pwm_ready) {
+        ledcWrite(PIN_PWMB, pwm);  // v3.x：以引脚号写入占空比
+    }
 }
 
 // ── 运动控制函数（对应 esp32_decoder.md 第十一节真值表）──────────
@@ -405,17 +422,49 @@ static void coastStop() {
     motorB(LOW, LOW, 0);
 }
 
+static void motorInitSafe() {
+    pinMode(PIN_STBY, OUTPUT);
+    digitalWrite(PIN_STBY, LOW);
+
+    pinMode(PIN_AIN1, OUTPUT);
+    pinMode(PIN_AIN2, OUTPUT);
+    pinMode(PIN_BIN1, OUTPUT);
+    pinMode(PIN_BIN2, OUTPUT);
+    digitalWrite(PIN_AIN1, LOW);
+    digitalWrite(PIN_AIN2, LOW);
+    digitalWrite(PIN_BIN1, LOW);
+    digitalWrite(PIN_BIN2, LOW);
+
+    const bool left_pwm_ready  = ledcAttach(PIN_PWMA, LEDC_FREQ, LEDC_RES);
+    const bool right_pwm_ready = ledcAttach(PIN_PWMB, LEDC_FREQ, LEDC_RES);
+    motor_pwm_ready = left_pwm_ready && right_pwm_ready;
+
+    if (motor_pwm_ready) {
+        brakeStop();
+    }
+}
+
 // ============================================================
 //  激光控制（IRremote NEC）
 // ============================================================
 
+static void ledsAddHit();
+
 // 开启激光：发送 NEC 数据帧（address 固定，command=tankCode），并通知 HTTP 任务上报
 static inline void laserOn() {
     IrSender.sendNEC(LASER_IR_ADDRESS, tankCode, 0);
+    Serial.printf("[LaserTX] NEC address=0x%02X, tankCode=0x%02X\n",
+                  LASER_IR_ADDRESS, tankCode);
+
+    if (LOCAL_LED_TEST_ON_FIRE) {
+        ledsAddHit();
+    }
 
     // 非阻塞投递：若队列已满则丢弃（不影响实时控制）
     const uint8_t sig = 1;
-    xQueueSend(http_queue, &sig, 0);
+    if (http_queue != nullptr) {
+        xQueueSend(http_queue, &sig, 0);
+    }
 }
 
 // IRremote 发送函数返回时该帧已完成，这里无需额外关断
@@ -425,8 +474,8 @@ static inline void laserOff() {
 /**
  * updateLaser() — 每帧调用，处理 L2 短按 / 长按 / 连发逻辑
  *
- * 短按（按下 < 500ms 后松开）：发射一次（200ms）
- * 长按（持续 >= 500ms）：每 300ms 循环发射（200ms 开 + 100ms 冷却）
+ * 短按（按下 < 500ms 后松开）：发送一帧 NEC
+ * 长按（持续 >= 500ms）：每 300ms 循环发送一帧 NEC
  *
  * @param l2_down  当前帧 L2 是否按下（Active LOW 已转换：true = 按下）
  */
@@ -461,7 +510,7 @@ static void updateLaser(bool l2_down) {
             break;
 
         case LASER_FIRING:
-            if ((now - laser_timer_ms) >= LASER_SHOT_MS) {
+            if ((now - laser_timer_ms) >= LASER_FRAME_GUARD_MS) {
                 laserOff();
                 if (laser_auto && l2_down) {
                     // 进入冷却期等待下次循环
@@ -547,6 +596,13 @@ static void updateHitDetect() {
         last_rx_tankid[sizeof(last_rx_tankid) - 1] = '\0';
     }
 
+    if (received_tankid == nullptr) {
+        Serial.printf("[LaserRX] Unknown tankCode=0x%02X, ignore\n",
+                      received_tankcode);
+        IrReceiver.resume();
+        return;
+    }
+
     if (isTeamTankCode(received_tankcode)) {
         Serial.printf("[LaserRX] Friendly/self tankCode=0x%02X tankid=%s, ignore\n",
                       received_tankcode, last_rx_tankid);
@@ -554,8 +610,13 @@ static void updateHitDetect() {
         return;
     }
 
-    if (now_ms >= rx_cooldown_ms) {
-        rx_cooldown_ms = now_ms + HIT_COOLDOWN_MS;
+    const bool different_tank = !has_last_hit || received_tankcode != last_hit_tankcode;
+    const bool cooldown_done = !has_last_hit ||
+        static_cast<int32_t>(now_ms - last_hit_ms) >= static_cast<int32_t>(HIT_COOLDOWN_MS);
+    if (different_tank || cooldown_done) {
+        last_hit_ms = now_ms;
+        last_hit_tankcode = received_tankcode;
+        has_last_hit = true;
         Serial.printf("[LaserRX] Enemy tankCode=0x%02X tankid=%s\n",
                       received_tankcode, last_rx_tankid);
         ledsAddHit();
@@ -576,11 +637,18 @@ void setup() {
     Serial.println(" Laser TX/RX + WS2812B LED");
     Serial.println("========================================");
 
+    // ── 电机安全初始化：先关闭 STBY，再进行可能阻塞的启动工作 ──
+    motorInitSafe();
+
     // ── HTTP 队列 + 任务初始化 ──────────────────────────────
     http_queue = xQueueCreate(HTTP_QUEUE_LEN, sizeof(uint8_t));
-    // Core 0：主循环在 Core 1，HTTP 不与电机控制竞争
-    xTaskCreatePinnedToCore(httpTask, "httpTask", 8192, nullptr, 1, nullptr, 0);
-    Serial.println("[HTTP]  Task started on Core 0");
+    if (http_queue != nullptr) {
+        // Core 0：主循环在 Core 1，HTTP 不与电机控制竞争
+        xTaskCreatePinnedToCore(httpTask, "httpTask", 8192, nullptr, 1, nullptr, 0);
+        Serial.println("[HTTP]  Task started on Core 0");
+    } else {
+        Serial.println("[HTTP]  Queue allocation failed; POST disabled");
+    }
 
     // ── WiFi 连接 ──────────────────────────────────────────
     WiFi.mode(WIFI_STA);
@@ -599,21 +667,8 @@ void setup() {
         Serial.println("  TIMEOUT  (HTTP 上报将被跳过)");
     }
 
-    // ── TB6612 D153C 初始化 ────────────────────────────────
-    pinMode(PIN_AIN1, OUTPUT);
-    pinMode(PIN_AIN2, OUTPUT);
-    pinMode(PIN_BIN1, OUTPUT);
-    pinMode(PIN_BIN2, OUTPUT);
-    pinMode(PIN_STBY, OUTPUT);
-
-    // 先制动停止，再使能驱动器（防止上电瞬间电机抖动）
-    brakeStop();
-    digitalWrite(PIN_STBY, HIGH);
-
-    // 配置电机 LEDC PWM（Arduino-ESP32 v3.x）
-    ledcAttach(PIN_PWMA, LEDC_FREQ, LEDC_RES);
-    ledcAttach(PIN_PWMB, LEDC_FREQ, LEDC_RES);
-    Serial.printf("[TB6612] STBY=HIGH, PWM %.0fkHz 8-bit  OK\n", LEDC_FREQ / 1000.0f);
+    Serial.printf("[TB6612] STBY=LOW, PWM %.0fkHz 8-bit %s\n",
+                  LEDC_FREQ / 1000.0f, motor_pwm_ready ? "OK" : "FAILED");
 
     // ── 激光发射 / 接收初始化（IRremote NEC）──────────────
     IrSender.begin(PIN_LASER_TX);
@@ -655,6 +710,10 @@ void setup() {
     if (ps2_connected) {
         Serial.println("  OK");
         Serial.println("[PS2]   Analog mode confirmed (ID=0x73)");
+        ps2_last_valid_ms = millis();
+        if (motor_pwm_ready) {
+            digitalWrite(PIN_STBY, HIGH);
+        }
     } else {
         Serial.println("  TIMEOUT");
         Serial.println("[PS2]   ⚠ Check: VCC=3.3V, DAT pull-up, wiring");
@@ -665,8 +724,8 @@ void setup() {
     Serial.println("[Ready] Left joystick → motor control");
     Serial.println("  LY<96  = forward   LY>160 = backward");
     Serial.println("  LX<96  = left      LX>160 = right");
-    Serial.println("  L2 short press = laser shot (200ms)");
-    Serial.println("  L2 long press  = auto laser (300ms cycle)");
+    Serial.println("  L2 short press = NEC laser frame");
+    Serial.println("  L2 long press  = auto NEC laser (300ms cycle)");
     Serial.println("  R2 press       = reset LEDs to green");
     Serial.printf("[Laser]  tankid=%s  tankCode=0x%02X\n", tankid, tankCode);
     Serial.println("========================================\n");
@@ -676,25 +735,46 @@ void setup() {
 //  loop()
 // ============================================================
 void loop() {
-    bool valid = ps2_poll();
+    const bool valid = ps2_poll();
+    const uint32_t now_ms = millis();
 
     // ── 连接状态变化通知 ──────────────────────────────────
     if (!valid) {
-        if (ps2_connected) {
-            Serial.println("[PS2] ⚠ Connection lost — motors/laser stopped");
+        ++ps2_invalid_frames;
+
+        if (ps2_connected && (now_ms - ps2_last_valid_ms >= PS2_LOSS_TIMEOUT_MS)) {
+            Serial.printf("[PS2] ⚠ Connection lost after %u invalid frames — motors/laser stopped\n",
+                          ps2_invalid_frames);
             ps2_connected = false;
+            ps2_invalid_frames = 0;
+            digitalWrite(PIN_STBY, LOW);
+            brakeStop();
+            laserOff();
+            laser_state = LASER_IDLE;
+            laser_auto  = false;
+            l2_prev     = false;
+            r2_prev     = false;
+        } else if (now_ms - ps2_last_invalid_log_ms >= PS2_INVALID_LOG_INTERVAL_MS) {
+            ps2_last_invalid_log_ms = now_ms;
+            Serial.printf("[PS2] Invalid frame #%u: %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                          ps2_invalid_frames,
+                          ps2_buf[0], ps2_buf[1], ps2_buf[2], ps2_buf[3], ps2_buf[4],
+                          ps2_buf[5], ps2_buf[6], ps2_buf[7], ps2_buf[8]);
         }
-        brakeStop();   // 失联时制动停止
-        laserOff();    // 失联时关闭激光
-        laser_state = LASER_IDLE;
-        laser_auto  = false;
-        l2_prev     = false;
-        delay(200);
+
+        // 短暂丢帧期间保持上一帧电机输出，避免单帧错误造成间歇性停机。
+        delay(2);
         return;
     }
+
+    ps2_last_valid_ms = now_ms;
+    ps2_invalid_frames = 0;
     if (!ps2_connected) {
         Serial.println("[PS2] ✓ Reconnected");
         ps2_connected = true;
+    }
+    if (motor_pwm_ready) {
+        digitalWrite(PIN_STBY, HIGH);
     }
 
     // ── 读取摇杆与按键 ────────────────────────────────────
@@ -707,7 +787,6 @@ void loop() {
     const bool r2_down = !(btn2 & BTN_R2);
 
     // ── R2：边沿检测，按下时重置 LED ──────────────────────
-    static bool r2_prev = false;
     if (r2_down && !r2_prev) {
         ledsInit();
         Serial.println("[LED]   R2 pressed — LEDs reset to green");
